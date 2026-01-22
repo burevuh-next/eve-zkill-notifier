@@ -7,6 +7,7 @@ def parse_killmail(full_data, config):
         victim = full_data.get('victim', {})
         system_id = full_data.get('solar_system_id')
         const_id = full_data.get('constellation_id')
+        reg_id = full_data.get('region_id')
         ship_id = victim.get('ship_type_id')
 
         # 1. Приоритет: Отслеживаемые корабли
@@ -14,7 +15,7 @@ def parse_killmail(full_data, config):
             return True, "SHIP_TARGET_SPOTTED"
 
         # 2. Локация: Система или Созвездие
-        if system_id in config['systems'] or const_id in config['constellations']:
+        if system_id in config['systems'] or const_id in config['constellations'] or reg_id in config['regions']:
             return True, "LOCATION_WATCH_EVENT"
 
         # 3. Корпорации

@@ -16,13 +16,32 @@ def get_env_list(key):
     return [int(x.strip()) for x in val.split(",") if x.strip().isdigit()]
 
 async def listen_zkill():
+    
+    def get_list(key):
+        val = os.getenv(key, "")
+        # Очищаем от пробелов и пустых значений, переводим в int
+        return {int(x.strip()) for x in val.split(",") if x.strip().isdigit()}
+    
     config = {
-        "corps": set(get_env_list("MY_CORP_IDS")),
-        "systems": set(get_env_list("WATCHED_SYSTEM_IDS")),
-        "constellations": set(get_env_list("WATCHED_CONSTELLATION_IDS")),
-        "ships": set(get_env_list("WATCHED_SHIP_IDS")),
+        "corps": get_list("MY_CORP_IDS"),
+        "systems": get_list("WATCHED_SYSTEM_IDS"),
+        "regions": get_list("WATCHED_REGIONS_IDS"),
+        "constellations": get_list("WATCHED_CONSTELLATION_IDS"),
+        "ships": get_list("WATCHED_SHIP_IDS"),
         "min_value": float(os.getenv("MIN_VALUE", 1000000))
     }
+    
+    print("="*30)
+    print("⚙️  КОНФИГУРАЦИЯ ЗАГРУЖЕНА:")
+    print(f"🏢  Корпорации:    {len(config['corps'])} шт.")
+    print(f"🌌  Системы:       {len(config['systems'])} шт.")
+    print(f"🛰  Регионы:       {len(config['regions'])} шт.")
+    print(f"🛰  Созвездия:     {len(config['constellations'])} шт.")
+    print(f"🚀  Типы кораблей: {len(config['ships'])} шт.")
+    print(f"💰  Мин. цена:     {config['min_value']:,.0f} ISK")
+    print("="*30)
+    
+    # return config
     webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
 
     print(f"🚀 Мониторинг запущен. Ожидание событий...")
@@ -36,13 +55,35 @@ async def listen_zkill():
                         await websocket.send(json.dumps({"action": "sub", "channel": f"corporation:{corp_id}"}))
                     for ship_id in config["ships"]:
                         await websocket.send(json.dumps({"action": "sub", "channel": f"ship:{ship_id}"}))
+                    for const_id in config["constellations"]:
+                        await websocket.send(json.dumps({"action": "sub", "channel": f"constellation:{const_id}"}))
+                    for reg_id in config["regions"]:
+                        await websocket.send(json.dumps({"action": "sub", "channel": f"region:{reg_id}"}))
                     
                     print("📡 Подписки активны. Слушаю эфир...")
 
                     async for message in websocket:
                         data = json.loads(message)
+                        
+                        channel = data.get('channel','')
+                        wh_const_id = None
+                        wh_reg_id = None
+                        
+                        if "constellation:" in channel:
+                            print(f"📡 [DEBUG] Поймали сигнал из созвездия: {channel}")                            
+                            try:
+                                wh_const_id = int(channel.split(":")[1])
+                            except:
+                                pass
+                        if "region:" in channel:
+                            print(f"📡 [DEBUG] Поймали сигнал из региона: {channel}")                            
+                            try:
+                                wh_reg_id = int(channel.split(":")[1])
+                            except:
+                                pass
+                        
                         k_id = data.get('killID') or data.get('killmail_id')
-
+                        # print(f"DEBUG: Получен сигнал ID {k_id}")
                         if k_id:
                             # ШАГ 1: Получаем хэш от zKill (если его нет в пакете)
                             zk_url = f"https://zkillboard.com/api/killID/{k_id}/"
@@ -58,8 +99,17 @@ async def listen_zkill():
                                 if resp.status == 200:
                                     esi_data = await resp.json()
                                     
+                                   
                                     # ШАГ 3: Собираем полный пакет и проверяем
                                     full_killmail = {**esi_data, "zkb": zk_data.get('zkb', {})}
+                                    
+                                    if wh_const_id:
+                                        full_killmail['constellation_id'] = wh_const_id
+                                        print(f"📍 Определено созвездие из канала: {wh_const_id}")
+                                    if wh_reg_id:
+                                        full_killmail['region_id'] = wh_reg_id
+                                        print(f"📍 Определен регион из канала: {wh_reg_id}")
+                                                       
                                     is_ok, event = parse_killmail(full_killmail, config)
 
                                     if is_ok:
