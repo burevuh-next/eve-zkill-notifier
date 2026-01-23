@@ -1,4 +1,4 @@
-# EVE Online zKill Notifier (v3.5) 🚀
+# EVE Online zKill Notifier (v3.6) 🚀
 
 Асинхронный Discord-бот на Python для мгновенного отслеживания убийств (killmails) в EVE Online. 
 Использует технологию WebSockets для получения данных в реальном времени.
