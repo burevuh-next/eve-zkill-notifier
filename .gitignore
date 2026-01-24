@@ -9,7 +9,7 @@ venv/
 
 # Environment
 .env
-
+subscriptions.json
 # IDE
 .vscode/
 .idea/.env
