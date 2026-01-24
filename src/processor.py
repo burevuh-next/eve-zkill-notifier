@@ -2,12 +2,12 @@ import logging
 import aiohttp
 import os
 from parser import parse_killmail
-from discord_utils import send_kill_notification
+from discord_utils import bot
+#from discord_utils import send_kill_notification
 from dotenv import load_dotenv
 
 load_dotenv()
 
-webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
 async def start_processor(data_queue, config):
     logging.info("⚙️ Обработчик событий запущен...")
     async with aiohttp.ClientSession(headers={"User-Agent": "Bober-Bot-v3.5"}) as session:
@@ -76,8 +76,9 @@ async def start_processor(data_queue, config):
                             is_ok, event = parse_killmail(full_killmail, config)
 
                             if is_ok:
-                                logging.info(f"🔥 [ID: {k_id}] Совпадение! Тип: {event}")
-                                send_kill_notification(webhook_url, full_killmail, event)
+                                logging.info(f"🔥 [ID: {k_id}] Совпадение! Отправка в Discord...")
+                                # Используем await, так как теперь это асинхронная функция бота
+                                await bot.send_kill_notification(os.getenv("DISCORD_CHANNEL_ID"), full_killmail, event)
             
             except Exception as e:
                 logging.error(f"❌ Ошибка обработки: {e}")
