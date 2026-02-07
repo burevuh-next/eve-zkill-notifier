@@ -1,20 +1,18 @@
-# Описание сервиса для сервера
-version: '3.8'
+version: '4.1'
 
 services:
   eve-bot:
     build: .
-    container_name: eve-notifier-app
-    restart: unless-stopped
-    # Загружаем переменные окружения из .env файла
+    container_name: eve-bot
+    restart: always
     env_file:
       - .env
-    # Настройка логирования, чтобы файлы не заняли всё место на диске
+    volumes:
+      - ./subscriptions.json:/app/subscriptions.json
+      - ./logs:/app/logs
+      - ./env:/app/.env
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-    volumes:
-      - ./.env:/app/.env
-    
