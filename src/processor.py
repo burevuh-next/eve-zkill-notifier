@@ -5,8 +5,12 @@ import asyncio
 from parser import parse_killmail
 from discord_utils import bot
 from dotenv import load_dotenv
+from collections import deque
 
 load_dotenv()
+
+# Храним последние 1000 ID обработанных киллов
+processed_kills = deque(maxlen=1000)
 
 async def fetch_with_retry(session, url, retries=3):
     """Повторяет запрос при сетевых сбоях или DNS тайм-аутах"""
@@ -31,10 +35,9 @@ async def start_processor(data_queue, config):
     
     async with aiohttp.ClientSession(headers={"User-Agent": os.getenv("USER_AGENT", "Bober-Bot-v4.0")}) as session:
         while True:
-            killmail_item = await data_queue.get()
+            data = await data_queue.get()
             
             try:
-                data = killmail_item
                 channel_info = data.get('channel', '')
                 wh_const_id = None
                 wh_reg_id = None            
@@ -49,8 +52,9 @@ async def start_processor(data_queue, config):
                 
                 k_id = data.get('killID') or data.get('killmail_id')
                 if not k_id:
+                    data_queue.task_done()
                     continue
-
+                
                 zk_data_source = data.get('zkb', {})
                 k_hash = zk_data_source.get('hash')
                 
@@ -77,6 +81,12 @@ async def start_processor(data_queue, config):
                                         
                     # Проверка по всем каналам
                     for ch_id, ch_config in all_subs.items():
+                        
+                        delivery_key = f"{k_id}:{ch_id}"     
+                        
+                        if delivery_key in processed_kills:
+                            continue 
+                        
                         is_ok, event = parse_killmail(full_killmail, ch_config)
                         if is_ok:
                             logging.info(f"🔥 [ID: {k_id}] Совпадение для канала {ch_id}! Отправка...")
