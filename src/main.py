@@ -38,17 +38,23 @@ def get_current_config():
         
         config = {k: list(v) for k, v in global_ids.items()}
         config["all_subs"] = subs 
-        config["min_value"] = float(os.getenv("MIN_VALUE", 1000000))
+        config["min_value"] = float(os.getenv("MIN_VALUE", 1))
         return config
     except Exception as e:
         logging.error(f"❌ Ошибка в get_current_config: {e}")
         return None
 
 async def run_zkill_tasks(shared_queue):
+    logging.info("--- ⚙️ СИСТЕМА МОНИТОРИНГА ГОТОВИТСЯ К СТАРТУ ---")
+
+    # Ждем, пока Discord бот загрузится (Shard ID станет не None)
+    while not bot.is_ready():
+        await asyncio.sleep(1)
+
     while True:
         config = get_current_config()
         if not config:
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)
             continue
 
         logging.info(f"🔄 Конфигурация обновлена. Активных каналов: {len(config['all_subs'])}")
@@ -60,12 +66,25 @@ async def run_zkill_tasks(shared_queue):
 
         while not bot.config_updated:
             if listener_task.done() or processor_task.done():
+                logging.error("🚨 Один из воркеров упал! Перезапуск через 5 сек...")
                 break
             await asyncio.sleep(2)
 
+        logging.warning("🔄 Остановка воркеров для обновления конфигурации...")
         listener_task.cancel()
         processor_task.cancel()
         await asyncio.gather(listener_task, processor_task, return_exceptions=True)
+        
+        # ОЧИЩАЕМ ОЧЕРЕДЬ принудительно, чтобы старые киллы не мешали     
+        while not shared_queue.empty():
+            try:
+                shared_queue.get_nowait()
+                shared_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+        
+        logging.info("♻️ Очередь очищена. Рестарт...")
+        await asyncio.sleep(2)
 
 async def main():
     shared_queue = asyncio.Queue(maxsize=200)
