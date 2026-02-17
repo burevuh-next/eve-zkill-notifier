@@ -1,15 +1,6 @@
-# Сетевые запросы и работа с API
+discord.py>=2.3.0
 aiohttp>=3.9.0
-requests>=2.31.0
-
-# WebSocket клиент для zKillboard
 websockets>=12.0
-
-# Работа с переменными окружения (.env)
 python-dotenv>=1.0.0
-
-# Асинхронные утилиты (входят в стандартную библиотеку, но иногда требуются бэкпорты)
-asyncio
-
-# Бот Discord
-discord.py>=2.3.2
+Pillow>=10.0.0
+psutil>=5.9.0  # для мониторинга

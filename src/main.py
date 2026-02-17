@@ -1,30 +1,61 @@
 import asyncio
 import logging
 import os
+import signal
+import logging.handlers
+import re
+
+# === НАСТРОЙКА ЛОГИРОВАНИЯ ===
+def setup_logging():
+    """Настройка логирования - вызывается до всех импортов"""
+    log_formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)-8s | %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    
+    file_handler = logging.handlers.RotatingFileHandler(
+        'killbot.log',
+        maxBytes=10*1024*1024,
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(log_formatter)
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    if not root_logger.handlers:
+        root_logger.addHandler(file_handler)
+        root_logger.addHandler(console_handler)
+    
+    logging.getLogger('discord').setLevel(logging.WARNING)
+    logging.getLogger('websockets').setLevel(logging.WARNING)
+
+setup_logging()
+
+# === ИМПОРТЫ ===
 from dotenv import load_dotenv
-
-# Импортируем всё необходимое из твоих файлов
-from listener import start_listener
-from processor import start_processor
-# Важно: убедись, что в discord_utils есть функция load_subs и объект bot
-from discord_utils import bot, load_subs 
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s | %(levelname)s: %(message)s',
-    datefmt='%H:%M:%S'
-)
-
 load_dotenv()
+from image_generator_large import get_generator, start_cleanup, stop_cleanup
+from listener import start_listener
+from processor import start_processor, get_processor_stats
+from discord_utils import bot, load_subs
+from monitoring import monitor
+
+shutdown_event = asyncio.Event()
 
 def get_current_config():
-    """Собирает агрегированный конфиг для WebSocket и детальный для каналов"""
+    """Загружает и оптимизирует конфигурацию"""
     try:
         subs = load_subs()
         if not subs:
-            logging.warning("⚠️ Файл subscriptions.json пуст или не найден!")
+            logging.warning("subscriptions.json is empty or not found!")
+            return None
         
+        # Оптимизация: сразу создаем сеты для быстрой проверки в парсере
         global_ids = {
             "corps": set(), "systems": set(), "regions": set(),
             "ships": set(), "ping_sys": set(), "ping_ship": set(),
@@ -33,75 +64,150 @@ def get_current_config():
         
         for ch_id, ch_data in subs.items():
             for key in global_ids.keys():
-                if key in ch_data:
-                    global_ids[key].update(ch_data[key])
+                if key in ch_data and isinstance(ch_data[key], list):
+                    # Конвертируем в int и добавляем в сет
+                    global_ids[key].update(int(x) for x in ch_data[key] if str(x).isdigit())
         
-        config = {k: list(v) for k, v in global_ids.items()}
-        config["all_subs"] = subs 
-        config["min_value"] = float(os.getenv("MIN_VALUE", 1))
+        # Создаем оптимизированный конфиг с сетами для парсера
+        config = {
+            "filter_sets": global_ids,  # Готовые сеты для быстрой проверки
+            "all_subs": subs,
+            "min_value": float(os.getenv("MIN_VALUE", 1_000_000))
+        }
+        
+        total_filters = sum(len(v) for v in global_ids.values())
+        logging.info(f"📊 Конфиг загружен: {total_filters} фильтров, {len(subs)} каналов")
         return config
+        
     except Exception as e:
-        logging.error(f"❌ Ошибка в get_current_config: {e}")
+        logging.error(f"❌ Ошибка загрузки конфига: {e}", exc_info=True)
         return None
 
 async def run_zkill_tasks(shared_queue):
-    logging.info("--- ⚙️ СИСТЕМА МОНИТОРИНГА ГОТОВИТСЯ К СТАРТУ ---")
+    logging.info("--- MONITORING SYSTEM STARTING ---")
 
-    # Ждем, пока Discord бот загрузится (Shard ID станет не None)
     while not bot.is_ready():
+        if shutdown_event.is_set():
+            return
         await asyncio.sleep(1)
 
-    while True:
-        config = get_current_config()
-        if not config:
-            await asyncio.sleep(10)
-            continue
+    logging.info("✅ Discord bot ready")
+    
+    # Запускаем очистку изображений
+    await start_cleanup()
+    
+    # Используем контекстный менеджер для мониторинга
+    async with monitor:
+        while not shutdown_event.is_set():
+            config = get_current_config()
+            
+            if not config:
+                logging.warning("⚠️ Config unavailable. Retry in 10s...")
+                await asyncio.sleep(10)
+                continue
 
-        logging.info(f"🔄 Конфигурация обновлена. Активных каналов: {len(config['all_subs'])}")
+            logging.info(f"🚀 Starting workers for {len(config['all_subs'])} channels")
 
-        listener_task = asyncio.create_task(start_listener(shared_queue, config))
-        processor_task = asyncio.create_task(start_processor(shared_queue, config))
-        
-        bot.config_updated = False
+            listener_task = asyncio.create_task(start_listener(shared_queue, config))
+            processor_task = asyncio.create_task(start_processor(shared_queue, config))
+            
+            bot.config_updated = False
 
-        while not bot.config_updated:
-            if listener_task.done() or processor_task.done():
-                logging.error("🚨 Один из воркеров упал! Перезапуск через 5 сек...")
-                break
-            await asyncio.sleep(2)
+            while not bot.config_updated and not shutdown_event.is_set():
+                if listener_task.done():
+                    try:
+                        listener_task.result()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logging.error(f"💥 Listener crashed: {e}")
+                    break
+                    
+                if processor_task.done():
+                    try:
+                        processor_task.result()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logging.error(f"💥 Processor crashed: {e}")
+                    break
+                    
+                await asyncio.sleep(2)
 
-        logging.warning("🔄 Остановка воркеров для обновления конфигурации...")
-        listener_task.cancel()
-        processor_task.cancel()
-        await asyncio.gather(listener_task, processor_task, return_exceptions=True)
-        
-        # ОЧИЩАЕМ ОЧЕРЕДЬ принудительно, чтобы старые киллы не мешали     
-        while not shared_queue.empty():
-            try:
-                shared_queue.get_nowait()
-                shared_queue.task_done()
-            except asyncio.QueueEmpty:
-                break
-        
-        logging.info("♻️ Очередь очищена. Рестарт...")
-        await asyncio.sleep(2)
+            logging.info("🛑 Stopping workers...")
+            
+            listener_task.cancel()
+            processor_task.cancel()
+            await asyncio.gather(listener_task, processor_task, return_exceptions=True)
+            
+            if not shutdown_event.is_set() and shared_queue.qsize() > 0:
+                logging.info(f"⏳ Processing {shared_queue.qsize()} remaining kills...")
+                try:
+                    await asyncio.wait_for(shared_queue.join(), timeout=30.0)
+                except asyncio.TimeoutError:
+                    logging.warning("⚠️ Timeout waiting for queue to clear")
+            
+            while not shared_queue.empty():
+                try:
+                    shared_queue.get_nowait()
+                    shared_queue.task_done()
+                except asyncio.QueueEmpty:
+                    break
+            
+            if not shutdown_event.is_set():
+                await asyncio.sleep(2)
+    await stop_cleanup()
+    logging.info("📊 Monitoring system stopped")
 
 async def main():
-    shared_queue = asyncio.Queue(maxsize=200)
-    token = os.getenv("DISCORD_BOT_TOKEN")
+    queue_size = int(os.getenv("QUEUE_MAX_SIZE", 200))
+    shared_queue = asyncio.Queue(maxsize=queue_size)
     
+    token = os.getenv("DISCORD_BOT_TOKEN")
     if not token:
-        logging.critical("❌ DISCORD_BOT_TOKEN отсутствует в .env!")
+        logging.critical("❌ DISCORD_BOT_TOKEN missing!")
         return
 
+    def signal_handler():
+        logging.info("🛑 Shutdown signal received")
+        shutdown_event.set()
+    
+    # Настройка обработчиков сигналов
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
+
     try:
-        # Запускаем две основные задачи параллельно
-        await asyncio.gather(
-            bot.start(token),
-            run_zkill_tasks(shared_queue)
+        logging.info("🚀 Starting EVE KillBot...")
+        
+        bot_task = asyncio.create_task(bot.start(token))
+        zkill_task = asyncio.create_task(run_zkill_tasks(shared_queue))
+        
+        done, pending = await asyncio.wait(
+            [bot_task, zkill_task],
+            return_when=asyncio.FIRST_COMPLETED
         )
-    except Exception as e:
-        logging.error(f"💥 Критическая ошибка запуска: {e}")
+        
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        
+    except KeyboardInterrupt:
+        pass
+    finally:
+        logging.info("🔌 Closing connections...")
+        
+        if not bot.is_closed():
+            await bot.close()
+        
+        if hasattr(bot, 'session') and bot.session and not bot.session.closed:
+            await bot.session.close()
+        
+        await asyncio.sleep(0.5)
+        logging.info("👋 EVE KillBot stopped. o7")
 
 if __name__ == "__main__":
     try:
