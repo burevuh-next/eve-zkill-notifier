@@ -1,26 +1,36 @@
-# Инструкции для сборки образа
-# Используем стабильную и легкую версию Python
 FROM python:3.10-slim
-
-# Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
-# Устанавливаем системные зависимости (если понадобятся для сборки некоторых библиотек)
+# Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libffi-dev \
+    libssl-dev \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Копируем файл зависимостей
+# Копируем requirements.txt
 COPY requirements.txt .
 
-# Устанавливаем библиотеки Python
-RUN pip install --no-cache-dir -r requirements.txt
+# Устанавливаем Python зависимости
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Копируем весь исходный код (папку src и main.py)
-COPY . .
+# Копируем весь код
+COPY src/ ./src/
+COPY .env .
+COPY subscriptions.json .
 
-# Указываем переменную окружения, чтобы логи выводились сразу (без буферизации)
-ENV PYTHONUNBUFFERED=1
+# Создаем необходимые директории
+RUN mkdir -p /app/image_cache/renders \
+             /app/image_cache/portraits \
+             /app/image_cache/corp_logos \
+             /app/killmail_images
 
-# Команда для запуска бота
-CMD ["python", "src/main.py"]
+# Проверяем наличие файлов генератора
+RUN ls -la /app/src/
+
+WORKDIR /app/src
+
+CMD ["python", "main.py"]
+EOF
