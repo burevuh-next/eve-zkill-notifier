@@ -97,6 +97,7 @@ async def start_listener(data_queue, config):
                         else:
                             logging.debug(f"⚙️ [LISTENER] Техническое сообщение: {data}")
                     
+                    
             except websockets.ConnectionClosed as e:
                 logging.warning(f"⚠️ WebSocket соединение закрыто: {e}. Переподключение через {reconnect_delay} сек...")
                 await asyncio.sleep(reconnect_delay)

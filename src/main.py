@@ -159,6 +159,7 @@ async def run_zkill_tasks(shared_queue):
     await stop_cleanup()
     logging.info("📊 Monitoring system stopped")
 
+
 async def main():
     queue_size = int(os.getenv("QUEUE_MAX_SIZE", 200))
     shared_queue = asyncio.Queue(maxsize=queue_size)

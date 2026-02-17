@@ -57,6 +57,7 @@ class LargeKillImageGenerator:
             "disk_space_freed_mb": 0  # Добавлено
         }
 
+
         # Запускаем фоновую задачу очистки
         self.cleanup_task = None
     async def start_cleanup_task(self):

@@ -6,6 +6,7 @@ import os
 import json
 from datetime import datetime
 
+
 SUBS_FILE = "subscriptions.json"
 
 def load_subs():

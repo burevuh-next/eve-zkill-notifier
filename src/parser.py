@@ -52,7 +52,6 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
             ping_ship = get_id_set('ping_ship')
 
         # --- ЛОГИКА ФИЛЬТРАЦИИ ---
-
         # А. ПРИОРИТЕТЫ (Игнорируют стоимость)
         if system_id in ping_sys or ship_id in ping_ship:
             return True, "PRIORITY_TARGET"

@@ -211,6 +211,7 @@ async def start_processor(data_queue, config):
                         f"Ошибок: {stats['errors']}"
                     )
 
+
 def get_processor_stats():
     """Возвращает текущую статистику процессора"""
     return stats.copy()

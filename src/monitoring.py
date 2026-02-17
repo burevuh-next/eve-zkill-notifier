@@ -201,5 +201,6 @@ class ResourceMonitor:
             "enabled": self.enabled
         }
 
+
 # Создаем глобальный экземпляр для использования в боте
 monitor = ResourceMonitor()
