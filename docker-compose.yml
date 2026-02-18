@@ -1,5 +1,3 @@
-version: '4.1'
-
 services:
   eve-bot:
     build: .
@@ -8,6 +6,8 @@ services:
     env_file:
       - .env
     volumes:
+      - ./image_cache:/app/image_cache
+      - ./killmail_images:/app/killmail_images
       - ./subscriptions.json:/app/subscriptions.json
       - ./logs:/app/logs
       - ./env:/app/.env

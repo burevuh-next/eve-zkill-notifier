@@ -18,7 +18,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Копируем весь код
 COPY src/ ./src/
-COPY .env .
 COPY subscriptions.json .
 
 # Создаем необходимые директории
@@ -29,8 +28,5 @@ RUN mkdir -p /app/image_cache/renders \
 
 # Проверяем наличие файлов генератора
 RUN ls -la /app/src/
-
 WORKDIR /app/src
-
 CMD ["python", "main.py"]
-EOF

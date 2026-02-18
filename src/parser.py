@@ -56,11 +56,23 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
         if system_id in ping_sys or ship_id in ping_ship:
             return True, "PRIORITY_TARGET"
 
-        # Б. ПРОВЕРКА СТОИМОСТИ
+        # Б. АТАКУЮЩИЕ (Тоже могут быть приоритеты)
+        for att in full_data.get('attackers', []):
+            a_corp_id = int(att.get('corporation_id', 0))
+            a_char_id = int(att.get('character_id', 0))
+            a_ship_id = int(att.get('ship_type_id', 0))
+            
+            if a_ship_id in ping_ship:  # Проверка корабля атакующего
+                return True, "PRIORITY_TARGET"
+            
+            if a_corp_id in watch_corps or a_char_id in watch_chars:
+                return True, "TARGET_KILL"
+
+        # В. ПРОВЕРКА СТОИМОСТИ
         if value < min_value:
             return False, None
 
-        # В. ЛОКАЦИИ И КОРАБЛИ
+        # Г. ЛОКАЦИИ И КОРАБЛИ
         if ship_id in watch_ships:
             return True, "SHIP_WATCH"
             
@@ -69,20 +81,14 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
             reg_id in watch_regions):
             return True, "LOCATION_WATCH"
 
-        # Г. ЖЕРТВА
+        # Д. ЖЕРТВА
         v_corp_id = int(victim.get('corporation_id', 0))
         v_char_id = int(victim.get('character_id', 0))
         
         if v_corp_id in watch_corps or v_char_id in watch_chars:
             return True, "TARGET_LOSS"
 
-        # Д. АТАКУЮЩИЕ
-        for att in full_data.get('attackers', []):
-            a_corp_id = int(att.get('corporation_id', 0))
-            a_char_id = int(att.get('character_id', 0))
-            
-            if a_corp_id in watch_corps or a_char_id in watch_chars:
-                return True, "TARGET_KILL"
+        
 
     except Exception as e:
         logging.error(f"❌ Ошибка в parse_killmail: {e}", exc_info=True)
