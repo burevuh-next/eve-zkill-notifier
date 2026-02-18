@@ -27,6 +27,5 @@ RUN mkdir -p /app/image_cache/renders \
              /app/killmail_images
 
 # Проверяем наличие файлов генератора
-RUN ls -la /app/src/
-WORKDIR /app/src
-CMD ["python", "main.py"]
+WORKDIR /app
+CMD ["python", "src/main.py"]

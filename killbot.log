@@ -198,3 +198,25 @@
 21:55:50 | INFO     | 📊 Monitoring system stopped
 21:55:50 | INFO     | 🔌 Closing connections...
 21:55:50 | INFO     | 👋 EVE KillBot stopped. o7
+22:39:16 | WARNING  | PyNaCl is not installed, voice will NOT be supported
+22:39:16 | INFO     | 🚀 Starting EVE KillBot...
+22:39:16 | INFO     | --- MONITORING SYSTEM STARTING ---
+22:39:20 | INFO     | ✅ Discord bot ready
+22:39:20 | INFO     | 🧹 Задача очистки изображений запущена (TTL: 24ч, макс: 100 файлов)
+22:39:20 | WARNING  | subscriptions.json is empty or not found!
+22:39:20 | WARNING  | ⚠️ Config unavailable. Retry in 10s...
+22:39:20 | INFO     | 📊 Мониторинг ресурсов запущен (интервал: 60с)
+22:39:30 | WARNING  | subscriptions.json is empty or not found!
+22:39:30 | WARNING  | ⚠️ Config unavailable. Retry in 10s...
+22:39:32 | INFO     | 🛑 Shutdown signal received
+22:39:40 | INFO     | 📊 Мониторинг ресурсов остановлен
+22:39:40 | INFO     | 📊 Итоговая статистика мониторинга:
+   • Время работы: 0:00:24
+   • Пик соединений: 2
+   • Пик памяти: 48.4 МБ
+   • Пик CPU: 0.0%
+   • Проверок выполнено: 1
+22:39:40 | INFO     | 🧹 Задача очистки изображений остановлена
+22:39:40 | INFO     | 📊 Monitoring system stopped
+22:39:40 | INFO     | 🔌 Closing connections...
+22:39:41 | INFO     | 👋 EVE KillBot stopped. o7
