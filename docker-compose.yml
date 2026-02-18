@@ -2,9 +2,7 @@ services:
   eve-bot:
     build: .
     container_name: eve-bot
-    restart: always
-    env_file:
-      - .env
+    restart: unless-stopped
     volumes:
       - ./image_cache:/app/image_cache
       - ./killmail_images:/app/killmail_images
