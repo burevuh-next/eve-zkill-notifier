@@ -2,8 +2,8 @@ import logging
 import aiohttp
 import os
 import asyncio
-from .parser import parse_killmail
-from .discord_utils import bot
+from parser import parse_killmail
+from discord_utils import bot
 from dotenv import load_dotenv
 from collections import deque
 
