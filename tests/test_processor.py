@@ -1,3 +1,6 @@
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import pytest
 from src.processor import update_duplicate_tracking, processed_kills_set, processed_kills_queue
 
