@@ -2,8 +2,8 @@ import logging
 import aiohttp
 import os
 import asyncio
-from parser import parse_killmail
-from discord_utils import bot
+from .parser import parse_killmail
+from .discord_utils import bot
 from dotenv import load_dotenv
 from collections import deque
 
@@ -86,7 +86,7 @@ async def start_processor(data_queue, config):
                 
                 if not k_id:
                     logging.warning("❓ Получены данные без KillID")
-                    data_queue.task_done()
+                   # data_queue.task_done()
                     continue
                 
                 logging.info(f"📥 [PROCESSOR] Начинаю обработку KillID: {k_id}")
@@ -94,7 +94,7 @@ async def start_processor(data_queue, config):
                 if k_id in processed_kills_set:
                     stats["duplicates_skipped"] += 1
                     logging.info(f"⏭️ [PROCESSOR] Пропускаю дубликат KillID: {k_id}")
-                    data_queue.task_done()
+                   # data_queue.task_done()
                     continue
                 
                 try:
@@ -201,8 +201,7 @@ async def start_processor(data_queue, config):
                 logging.error(f"💥 Критическая ошибка в processor loop: {e}", exc_info=True)
                 
             finally:
-                data_queue.task_done()
-                
+                               
                 if stats["processed_total"] % 100 == 0 and stats["processed_total"] > 0:
                     logging.info(
                         f"📊 Статистика: Обработано: {stats['processed_total']}, "
@@ -210,6 +209,17 @@ async def start_processor(data_queue, config):
                         f"Дубликатов: {stats['duplicates_skipped']}, "
                         f"Ошибок: {stats['errors']}"
                     )
+                # Вызываем task_done() только если мы получили элемент из очереди
+                # и не были отменены
+                try:
+                    # Проверяем, что элемент действительно был получен
+                    if 'data' in locals() or 'data' in dir():
+                        data_queue.task_done()
+                except ValueError as e:
+                    # Логируем ошибку, но не даём ей прервать выполнение
+                    logging.debug(f"task_done() error (ignored): {e}")
+                except Exception as e:
+                    logging.error(f"Error in finally block: {e}")
 
 
 def get_processor_stats():

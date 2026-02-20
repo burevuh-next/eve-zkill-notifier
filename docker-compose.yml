@@ -8,7 +8,7 @@ services:
       - ./killmail_images:/app/killmail_images
       - ./subscriptions.json:/app/subscriptions.json
       - ./logs:/app/logs
-      - ./env:/app/.env
+      - ./.env:/app/.env
     logging:
       driver: "json-file"
       options:

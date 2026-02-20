@@ -4,3 +4,7 @@ websockets>=12.0
 python-dotenv>=1.0.0
 Pillow>=10.0.0
 psutil>=5.9.0  # для мониторинга
+pytest
+pytest-asyncio
+pytest-mock
+aioresponses  # для мокания aiohttp запросов
