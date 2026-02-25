@@ -53,7 +53,11 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
 
         # --- ЛОГИКА ФИЛЬТРАЦИИ ---
         # А. ПРИОРИТЕТЫ (Игнорируют стоимость)
-        if system_id in ping_sys or ship_id in ping_ship:
+        if system_id in ping_sys:
+            logging.info('Система в приоритете: {system_id}')
+            return True, "PRIORITY_TARGET" 
+        if ship_id in ping_ship:
+            logging.info('Корабль в приоритете: {ship_id}')
             return True, "PRIORITY_TARGET"
 
         # Б. АТАКУЮЩИЕ (Тоже могут быть приоритеты)
@@ -69,8 +73,8 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
                 return True, "TARGET_KILL"
 
         # В. ПРОВЕРКА СТОИМОСТИ
-        if value < min_value:
-            return False, None
+        #if value < min_value:
+        #    return False, None
 
         # Г. ЛОКАЦИИ И КОРАБЛИ
         if ship_id in watch_ships:

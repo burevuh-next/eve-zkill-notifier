@@ -4,6 +4,11 @@ import os
 import signal
 import logging.handlers
 import re
+from character_analyzer import get_character_analyzer
+
+
+analyzer = get_character_analyzer()
+
 
 # === НАСТРОЙКА ЛОГИРОВАНИЯ ===
 def setup_logging():

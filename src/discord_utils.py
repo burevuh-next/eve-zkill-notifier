@@ -5,6 +5,7 @@ import logging
 import os
 import json
 from datetime import datetime
+from character_analyzer import get_character_analyzer
 
 
 SUBS_FILE = "subscriptions.json"
@@ -253,12 +254,16 @@ async def remove_from_watch(ctx, category: str, item_id: int):
 
 @commands.command(name="status")
 async def status(ctx):
+    """Показывает полный список отслеживаемых параметров в канале"""
     subs = load_subs()
     ch_id = str(ctx.channel.id)
+    
     if ch_id not in subs: 
         return await ctx.send("❌ Use `!init` first.")
     
     ch_data = subs[ch_id]
+    
+    # Собираем все ID для получения имен
     all_ids = []
     for k in ["ships","systems","regions","consts","corps","chars","ping_sys","ping_ship"]:
         all_ids.extend(ch_data.get(k, []))
@@ -266,33 +271,66 @@ async def status(ctx):
     names = await bot.get_eve_names(all_ids)
     
     embed = discord.Embed(
-        title="📊 Channel Status", 
+        title=f"📊 Channel Status - {ctx.channel.name}", 
         color=discord.Color.blue(), 
         timestamp=datetime.utcnow()
     )
     
     categories = [
-        ("ships", "🚀 Ships"),
-        ("systems", "🪐 Systems"),
-        ("regions", "🌌 Regions"),
-        ("consts", "⚡ Constellations"),
-        ("corps", "🏢 Corporations"),
-        ("chars", "👤 Characters"),
-        ("ping_sys", "🔔 Priority Systems"),
-        ("ping_ship", "🔔 Priority Ships")
+        ("ping_sys", "🔔 **Priority Systems**", "⚡"),
+        ("ping_ship", "🔔 **Priority Ships**", "🚀"),
+        ("systems", "🪐 **Systems**", "🌍"),
+        ("regions", "🌌 **Regions**", "🗺️"),
+        ("consts", "⚡ **Constellations**", "✨"),
+        ("ships", "🚀 **Ships**", "⚓"),
+        ("corps", "🏢 **Corporations**", "🏛️"),
+        ("chars", "👤 **Characters**", "🧑")
     ]
     
-    for key, label in categories:
+    has_any = False
+    
+    for key, label, emoji in categories:
         ids = ch_data.get(key, [])
         if ids:
+            has_any = True
+            # Формируем список ВСЕХ элементов
             items = []
-            for i in ids[:5]:  # Показываем только первые 5
-                items.append(f"• {names.get(i, i)} [{i}]")
-            if len(ids) > 5:
-                items.append(f"... и еще {len(ids) - 5}")
-            embed.add_field(name=label, value="\n".join(items), inline=False)
+            for item_id in ids:
+                name = names.get(item_id, f"Unknown [{item_id}]")
+                items.append(f"• {name}")
+            
+            # Объединяем в текст
+            items_text = "\n".join(items)
+            
+            # Discord имеет лимит 1024 символа на поле
+            if len(items_text) <= 1024:
+                embed.add_field(name=f"{emoji} {label}", value=items_text, inline=False)
+            else:
+                # Если слишком длинно, разбиваем на несколько полей
+                chunks = [items[i:i+15] for i in range(0, len(items), 15)]
+                for i, chunk in enumerate(chunks):
+                    chunk_text = "\n".join(chunk)
+                    field_name = f"{emoji} {label} (part {i+1}/{len(chunks)})"
+                    embed.add_field(name=field_name, value=chunk_text, inline=False)
     
-    embed.add_field(name="💰 Threshold", value=f"**{bot.format_isk(ch_data.get('min_value', 0))} ISK**")
+    if not has_any:
+        embed.add_field(
+            name="📭 No active filters",
+            value="Add filters using:\n`!add system <ID>`\n`!add ship <ID>`\n`!add corp <ID>`\netc.",
+            inline=False
+        )
+    
+    # Добавляем информацию о минимальной стоимости
+    min_value = ch_data.get('min_value', 1_000_000)
+    embed.add_field(
+        name="💰 Threshold",
+        value=f"**{bot.format_isk(min_value)} ISK**",
+        inline=False
+    )
+    
+    # Добавляем статистику
+    total_filters = sum(len(ch_data.get(k, [])) for k in ["ships","systems","regions","consts","corps","chars","ping_sys","ping_ship"])
+    embed.set_footer(text=f"Total filters: {total_filters} • Channel ID: {ch_id}")
     
     await ctx.send(embed=embed)
 
@@ -398,11 +436,77 @@ async def image_clean(ctx):
     else:
         await msg.edit(content="✅ Старых изображений не найдено")
 
+@commands.command(name="analyze", aliases=["a", "who"])
+async def analyze_characters(ctx, *, names_text: str = None):
+    """
+    Анализирует список персонажей из локала
+    Пример: !analyze <скопированные имена из локала>
+    """
+    if not names_text:
+        await ctx.send("❌ Укажите имена для анализа. Скопируйте их из локала и отправьте командой.\nПример: `!analyze` и вставьте список")
+        return
+    
+    # Сообщение о начале анализа
+    msg = await ctx.send(f"🔍 Анализирую {len(names_text.splitlines())} персонажей... Это может занять некоторое время.")
+    
+    try:
+        analyzer = get_character_analyzer()
+        await analyzer.ensure_session()
+        
+        results = await analyzer.analyze_characters(names_text)
+        
+        if not results:
+            await msg.edit(content="❌ Не удалось найти ни одного персонажа. Проверьте имена и попробуйте снова.")
+            return
+        
+        # Форматируем результат
+        formatted = analyzer.format_for_discord(results)
+        
+        # Discord имеет лимит 2000 символов, разбиваем если нужно
+        if len(formatted) > 1900:
+            parts = [formatted[i:i+1900] for i in range(0, len(formatted), 1900)]
+            await msg.edit(content=parts[0])
+            for part in parts[1:]:
+                await ctx.send(part)
+        else:
+            await msg.edit(content=formatted)
+        
+        # Показываем статистику
+        stats = analyzer.get_stats()
+        await ctx.send(f"📊 Статистика: проанализировано {stats['analyzed_characters']} персонажей, "
+                      f"запросов к zKillboard: {stats['zkill_requests']}")
+    
+    except Exception as e:
+        await msg.edit(content=f"❌ Ошибка при анализе: {str(e)}")
+        logging.error(f"Ошибка в analyze_characters: {e}", exc_info=True)
+    finally:
+        # Закрываем сессию
+        analyzer = get_character_analyzer()
+        await analyzer.close_session()
 
-
-
+@commands.command(name="analyze_stats")
+async def analyzer_stats(ctx):
+    """Показывает статистику работы анализатора"""
+    analyzer = get_character_analyzer()
+    stats = analyzer.get_stats()
+    
+    embed = discord.Embed(
+        title="📊 Статистика Character Analyzer",
+        color=discord.Color.blue(),
+        timestamp=datetime.utcnow()
+    )
+    
+    embed.add_field(name="👤 Проанализировано", value=stats["analyzed_characters"], inline=True)
+    embed.add_field(name="📡 Запросов к zKill", value=stats["zkill_requests"], inline=True)
+    embed.add_field(name="❌ Ошибок API", value=stats["api_errors"], inline=True)
+    embed.add_field(name="💾 Кеш-хитов", value=stats["cache_hits"], inline=True)
+    embed.add_field(name="📁 Размер кеша", value=stats["cache_size"], inline=True)
+    
+    await ctx.send(embed=embed)
 
 # Регистрируем команды
+bot.add_command(analyze_characters)
+bot.add_command(analyzer_stats)
 bot.add_command(image_clean)
 bot.add_command(help_command)
 bot.add_command(init_channel)
