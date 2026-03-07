@@ -57,7 +57,6 @@ class CharacterAnalyzer:
         # Очищаем имена от лишних символов
         clean_names = []
         for name in names:
-            # Убираем возможные префиксы из EVE локального чата
             name = re.sub(r'^[<>]+\s*', '', name.strip())
             name = re.sub(r'\s+$', '', name)
             if name and len(name) > 1:
@@ -74,11 +73,9 @@ class CharacterAnalyzer:
                     data = await resp.json()
                     result = {}
                     
-                    # ESI возвращает разные секции для разных типов
                     for char_data in data.get('characters', []):
                         result[char_data['name']] = char_data['id']
                     
-                    # Логируем не найденные имена
                     found_names = set(result.keys())
                     for name in clean_names:
                         if name not in found_names:
@@ -110,7 +107,6 @@ class CharacterAnalyzer:
                 if resp.status == 200:
                     data = await resp.json()
                     
-                    # Базовая информация
                     char_info = {
                         "id": character_id,
                         "name": data.get('name', f"Unknown_{character_id}"),
@@ -121,13 +117,11 @@ class CharacterAnalyzer:
                         "title": data.get('title', '')
                     }
                     
-                    # Получаем информацию о корпорации
                     if char_info["corporation_id"]:
                         corp_info = await self.get_corporation_info(char_info["corporation_id"])
                         char_info["corporation_name"] = corp_info.get("name", "Unknown")
                         char_info["corporation_ticker"] = corp_info.get("ticker", "")
                     
-                    # Получаем информацию об альянсе
                     if char_info["alliance_id"]:
                         alliance_info = await self.get_alliance_info(char_info["alliance_id"])
                         char_info["alliance_name"] = alliance_info.get("name", "Unknown")
@@ -196,109 +190,130 @@ class CharacterAnalyzer:
         except Exception:
             return {"id": alliance_id, "name": f"Alliance_{alliance_id}", "ticker": ""}
     
-
+    async def get_kill_details_from_esi(self, kill_id: int, hash: str) -> Optional[Dict]:
+        """
+        Получает полные данные килла из ESI по ID и хэшу
+        """
+        await self.ensure_session()
+        url = f"https://esi.evetech.net/latest/killmails/{kill_id}/{hash}/"
+        
+        try:
+            async with self.session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    logging.info(f"Получены данные из ESI для килла {kill_id}")
+                    return data
+                else:
+                    logging.warning(f"ESI вернул {resp.status} для килла {kill_id}")
+                    return None
+        except Exception as e:
+            logging.error(f"Ошибка при запросе к ESI для килла {kill_id}: {e}")
+            return None
+    
     async def get_zkill_activity(self, character_id: int, limit: int = 10) -> Dict:
         """
         Получает активность персонажа с zKillboard
         """
         self.stats["zkill_requests"] += 1
         
-        # Проверяем кеш
         cache_key = f"zkill_{character_id}"
         if cache_key in self.cache["zkill"]:
             cache_data = self.cache["zkill"][cache_key]
-            # Кеш жив 5 минут
             if datetime.now().timestamp() - cache_data["timestamp"] < 300:
                 self.stats["cache_hits"] += 1
                 return cache_data["data"]
         
         await self.ensure_session()
         
-        # Используем стандартный endpoint без параметра limit
-        # zKillboard по умолчанию возвращает последние киллы
+        # Получаем статистику с zKillboard
+        stats_url = f"https://zkillboard.com/api/stats/characterID/{character_id}/"
         kills_url = f"https://zkillboard.com/api/kills/characterID/{character_id}/"
         losses_url = f"https://zkillboard.com/api/losses/characterID/{character_id}/"
         
         kills = []
         losses = []
+        stats_data = {}
         
         try:
-            # Запрашиваем киллы
+            async with self.session.get(stats_url) as resp:
+                if resp.status == 200:
+                    stats_data = await resp.json()
+                    logging.info(f"✅ Получена статистика с zKillboard для {character_id}")
+                    logging.info(f"📊 Сырые данные stats: {stats_data}")
+                    
+                    # Проверим наличие alltime
+                    if 'alltime' in stats_data:
+                        logging.info(f"✅ Найден alltime: {stats_data['alltime']}")
+                    else:
+                        logging.warning(f"❌ Нет alltime в ответе")
+                else:
+                    logging.warning(f"❌ zKillboard вернул статус {resp.status} для статистики {character_id}")
+                    stats_data = {}
+        except Exception as e:
+            logging.error(f"❌ Ошибка при запросе статистики: {e}")
+            stats_data = {}
+        
+        # Получаем соло статистику из zKillboard
+        solo_kills = stats_data.get('soloKills', 0)  # 568
+        total_kills = stats_data.get('shipsDestroyed', 0)  # 1360
+        solo_ratio = stats_data.get('soloRatio', 0)  # 45.2
+
+        logging.info(f"🎯 Соло киллы из zKillboard: {solo_kills} из {total_kills} ({solo_ratio}%)")
+        
+        # Получаем топ корабли из stats zKillboard
+        favorite_ships_alltime = Counter()
+        if stats_data and 'topAllTime' in stats_data:
+            for item in stats_data['topAllTime']:
+                if item.get('type') == 'ship':
+                    ships_data = item.get('data', [])
+                    logging.info(f"📊 Получено {len(ships_data)} топ кораблей с zKillboard")
+                    for ship in ships_data[:10]:  # Берем топ-10
+                        ship_id = ship.get('shipTypeID')
+                        kills = ship.get('kills', 0)
+                        if ship_id:
+                            favorite_ships_alltime[ship_id] = kills
+                            logging.info(f"  - Корабль {ship_id}: {kills} убийств")
+                    break
+        
+        
+        try:
             async with self.session.get(kills_url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    # Проверяем, что данные - это список
                     if isinstance(data, list):
                         kills = data
                         logging.info(f"Получено {len(kills)} киллов для {character_id}")
-                    else:
-                        # Если это словарь, возможно это сообщение об ошибке
-                        if isinstance(data, dict):
-                            if 'error' in data:
-                                logging.warning(f"zKillboard вернул ошибку для киллов {character_id}: {data['error']}")
-                            else:
-                                logging.warning(f"zKillboard вернул словарь для киллов {character_id}: {data.keys()}")
-                        kills = []
-                elif resp.status == 404:
-                    logging.info(f"Нет данных о киллах для {character_id}")
-                    kills = []
-                else:
-                    logging.warning(f"zKillboard вернул статус {resp.status} для киллов {character_id}")
-                    kills = []
-        
         except Exception as e:
-            logging.error(f"Ошибка при запросе киллов к zKillboard: {e}")
-            self.stats["api_errors"] += 1
-            kills = []
+            logging.error(f"Ошибка при запросе киллов: {e}")
         
         try:
-            # Запрашиваем потери
             async with self.session.get(losses_url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    # Проверяем, что данные - это список
                     if isinstance(data, list):
                         losses = data
                         logging.info(f"Получено {len(losses)} потерь для {character_id}")
-                    else:
-                        # Если это словарь, возможно это сообщение об ошибке
-                        if isinstance(data, dict):
-                            if 'error' in data:
-                                logging.warning(f"zKillboard вернул ошибку для потерь {character_id}: {data['error']}")
-                            else:
-                                logging.warning(f"zKillboard вернул словарь для потерь {character_id}: {data.keys()}")
-                        losses = []
-                elif resp.status == 404:
-                    logging.info(f"Нет данных о потерях для {character_id}")
-                    losses = []
-                else:
-                    logging.warning(f"zKillboard вернул статус {resp.status} для потерь {character_id}")
-                    losses = []
-        
         except Exception as e:
-            logging.error(f"Ошибка при запросе потерь к zKillboard: {e}")
-            self.stats["api_errors"] += 1
-            losses = []
+            logging.error(f"Ошибка при запросе потерь: {e}")
         
-        # Ограничиваем количество данных вручную после получения
-        kills = kills[:limit] if kills else []
-        losses = losses[:limit] if losses else []
+        kills_sample = kills[:limit] if kills else []
+        losses_sample = losses[:limit] if losses else []
         
-        # Анализируем активность
         result = {
             "kills": [],
             "losses": [],
-            "total_kills": len(kills),
-            "total_losses": len(losses),
-            "favorite_ships": Counter(),
+            "total_kills": total_kills,
+            "total_losses": stats_data.get('shipLost', 0),
+            "favorite_ships": favorite_ships_alltime,
             "common_systems": Counter(),
-            "solo_kills": 0,
-            "gang_kills": 0,
+            "solo_kills": solo_kills,
+            "solo_ratio": solo_ratio,
+            "gang_kills": total_kills - solo_kills,
             "recent_activity": None,
-            "has_data": len(kills) > 0 or len(losses) > 0
+            "has_data": len(kills) > 0 or len(losses) > 0,
+            "stats": stats_data
         }
         
-        # Если нет данных, сразу возвращаем результат
         if not result["has_data"]:
             logging.info(f"Нет активности для персонажа {character_id}")
             self.cache["zkill"][cache_key] = {
@@ -308,33 +323,35 @@ class CharacterAnalyzer:
             return result
         
         # Анализируем киллы
-        if kills and isinstance(kills, list):
-            for kill in kills[:5]:  # Берем только первые 5 для детального анализа
+        if kills_sample:
+            for kill in kills_sample[:5]:
                 try:
                     kill_data = await self._analyze_kill(kill, character_id, is_killer=True)
-                    if kill_data:  # Проверяем, что данные не пустые
+                    if kill_data:
                         result["kills"].append(kill_data)
                         
-                        # Извлекаем данные для статистики
-                        victim = kill.get('victim', {})
-                        if isinstance(victim, dict):
-                            ship_id = victim.get('ship_type_id')
-                            if ship_id:
-                                result["favorite_ships"][ship_id] += 1
+                        # Собираем статистику по кораблям
+                        attackers = kill.get('attackers', [])
+                        if isinstance(attackers, list):
+                            for attacker in attackers:
+                                if isinstance(attacker, dict) and attacker.get('character_id') == character_id:
+                                    ship_id = attacker.get('ship_type_id')
+                                    if ship_id:
+                                        result["favorite_ships"][ship_id] += 1
+                                    break
                         
                         system_id = kill.get('solar_system_id')
                         if system_id:
                             result["common_systems"][system_id] += 1
                         
-                        # Проверяем соло/группа
-                        attackers = kill.get('attackers', [])
-                        if isinstance(attackers, list):
-                            if len(attackers) == 1:
+                        # Соло/группа
+                        attackers_list = kill.get('attackers', [])
+                        if isinstance(attackers_list, list):
+                            if len(attackers_list) == 1:
                                 result["solo_kills"] += 1
                             else:
                                 result["gang_kills"] += 1
                         
-                        # Время последней активности
                         kill_time = kill.get('killmail_time', '')
                         if kill_time and (not result["recent_activity"] or kill_time > result["recent_activity"]):
                             result["recent_activity"] = kill_time
@@ -343,14 +360,13 @@ class CharacterAnalyzer:
                     continue
         
         # Анализируем потери
-        if losses and isinstance(losses, list):
-            for loss in losses[:5]:
+        if losses_sample:
+            for loss in losses_sample[:5]:
                 try:
                     loss_data = await self._analyze_kill(loss, character_id, is_killer=False)
                     if loss_data:
                         result["losses"].append(loss_data)
                         
-                        # Извлекаем данные для статистики
                         victim = loss.get('victim', {})
                         if isinstance(victim, dict):
                             ship_id = victim.get('ship_type_id')
@@ -361,7 +377,6 @@ class CharacterAnalyzer:
                         if system_id:
                             result["common_systems"][system_id] += 1
                         
-                        # Время последней активности
                         loss_time = loss.get('killmail_time', '')
                         if loss_time and (not result["recent_activity"] or loss_time > result["recent_activity"]):
                             result["recent_activity"] = loss_time
@@ -369,7 +384,6 @@ class CharacterAnalyzer:
                     logging.error(f"Ошибка при анализе потери: {e}")
                     continue
         
-        # Сохраняем в кеш
         self.cache["zkill"][cache_key] = {
             "timestamp": datetime.now().timestamp(),
             "data": result
@@ -379,117 +393,129 @@ class CharacterAnalyzer:
         return result
     
     async def _analyze_kill(self, kill: Dict, character_id: int, is_killer: bool) -> Optional[Dict]:
-      """
-      Анализирует отдельный килл с полным получением имен
-      """
-      if not isinstance(kill, dict):
-          logging.warning(f"Передан не словарь в _analyze_kill: {type(kill)}")
-          return None
-      
-      try:
-          victim = kill.get('victim', {})
-          if not isinstance(victim, dict):
-              victim = {}
-          
-          zkb = kill.get('zkb', {})
-          if not isinstance(zkb, dict):
-              zkb = {}
-          
-          # Получаем ID для запросов
-          killmail_id = kill.get('killmail_id', 0)
-          
-          # Определяем роль персонажа
-          if is_killer:
-              # Ищем атакующего с нашим персонажем
-              attacker_info = None
-              attackers = kill.get('attackers', [])
-              if isinstance(attackers, list):
-                  for attacker in attackers:
-                      if isinstance(attacker, dict) and attacker.get('character_id') == character_id:
-                          attacker_info = attacker
-                          break
-              
-              ship_id = attacker_info.get('ship_type_id') if attacker_info and isinstance(attacker_info, dict) else 0
-              ship_name = await self.get_ship_name(ship_id) if ship_id else "Unknown Ship"
-              damage = attacker_info.get('damage_done', 0) if attacker_info and isinstance(attacker_info, dict) else 0
-              final_blow = attacker_info.get('final_blow', False) if attacker_info and isinstance(attacker_info, dict) else False
-              
-              # Кого убили
-              victim_id = victim.get('character_id', 0)
-              victim_name = await self.get_character_name(victim_id) if victim_id else "Unknown"
-              victim_ship_id = victim.get('ship_type_id', 0)
-              victim_ship = await self.get_ship_name(victim_ship_id) if victim_ship_id else "Unknown Ship"
-              
-              ship_display = ship_name
-              victim_display = f"{victim_name} in {victim_ship}"
-          else:
-              # Персонаж - жертва
-              ship_id = victim.get('ship_type_id', 0)
-              ship_name = await self.get_ship_name(ship_id) if ship_id else "Unknown Ship"
-              damage = None
-              final_blow = None
-              
-              # Кто убил (финальный удар)
-              final_blow_attacker = None
-              attackers = kill.get('attackers', [])
-              if isinstance(attackers, list):
-                  for attacker in attackers:
-                      if isinstance(attacker, dict) and attacker.get('final_blow', False):
-                          final_blow_attacker = attacker
-                          break
-              
-              if final_blow_attacker:
-                  killer_id = final_blow_attacker.get('character_id', 0)
-                  killer_name = await self.get_character_name(killer_id) if killer_id else "Unknown"
-                  killer_ship_id = final_blow_attacker.get('ship_type_id', 0)
-                  killer_ship = await self.get_ship_name(killer_ship_id) if killer_ship_id else "Unknown Ship"
-                  victim_display = f"killed by {killer_name} in {killer_ship}"
-              else:
-                  victim_display = "Unknown killer"
-              
-              ship_display = ship_name
-          
-          # Получаем название системы
-          system_id = kill.get('solar_system_id', 0)
-          system_name = await self.get_system_name(system_id) if system_id else "Unknown System"
-          
-          # Форматируем стоимость
-          value = zkb.get('totalValue', 0)
-          if value >= 1_000_000_000:
-              value_str = f"{value/1_000_000_000:.2f}B"
-          elif value >= 1_000_000:
-              value_str = f"{value/1_000_000:.1f}M"
-          else:
-              value_str = f"{value:,.0f}"
-          
-          attackers_list = kill.get('attackers', [])
-          attackers_count = len(attackers_list) if isinstance(attackers_list, list) else 0
-          
-          result = {
-              "kill_id": killmail_id,
-              "time": kill.get('killmail_time', ''),
-              "system": system_name,
-              "system_id": system_id,
-              "value": value,
-              "value_str": value_str,
-              "ship": ship_display,
-              "ship_id": ship_id,
-              "victim": victim_display,
-              "damage_done": damage,
-              "final_blow": final_blow,
-              "attackers_count": attackers_count,
-              "is_killer": is_killer,
-              "zkb_url": f"https://zkillboard.com/kill/{killmail_id}/"
-          }
-          
-          # Логируем для отладки
-          logging.debug(f"Анализ килла {killmail_id}: {result['victim']} в {result['system']}")
-          
-          return result
+        """
+        Анализирует отдельный килл
+        """
+        if not isinstance(kill, dict):
+            return None
         
-      except Exception as e:
-          logging.error(f"Ошибка в _analyze_kill: {e}")
-          return None
+        try:
+            killmail_id = kill.get('killmail_id', 0)
+            zkb = kill.get('zkb', {})
+            
+            victim = kill.get('victim', {})
+            if not victim or not victim.get('character_id'):
+                kill_hash = zkb.get('hash')
+                if kill_hash:
+                    esi_data = await self.get_kill_details_from_esi(killmail_id, kill_hash)
+                    if esi_data:
+                        kill = esi_data
+                        victim = kill.get('victim', {})
+            
+            if not victim:
+                return None
+            
+            system_id = kill.get('solar_system_id', 0)
+            victim_id = victim.get('character_id', 0)
+            victim_ship_id = victim.get('ship_type_id', 0)
+            
+            system_name = await self.get_system_name(system_id) if system_id else "Unknown System"
+            victim_name = await self.get_character_name(victim_id) if victim_id else "Unknown"
+            victim_ship = await self.get_ship_name(victim_ship_id) if victim_ship_id else "Unknown Ship"
+            
+            # Получаем время килла и форматируем его
+            kill_time = kill.get('killmail_time', '')
+            formatted_time = "Unknown"
+            if kill_time:
+                try:
+                    # Парсим ISO формат и преобразуем в читаемый вид
+                    dt = datetime.fromisoformat(kill_time.replace('Z', '+00:00'))
+                    # Формат: "2024-03-07 15:30"
+                    formatted_time = dt.strftime('%Y-%m-%d %H:%M')
+                except Exception as e:
+                    logging.error(f"Ошибка парсинга времени {kill_time}: {e}")
+            
+             # Определяем количество атакующих
+            attackers_list = kill.get('attackers', [])
+            attackers_count = len(attackers_list) if isinstance(attackers_list, list) else 0
+            is_solo = attackers_count == 1
+            
+            if is_killer:
+                # Ищем атакующего
+                attacker_info = None
+                attackers = kill.get('attackers', [])
+                if isinstance(attackers, list):
+                    for attacker in attackers:
+                        if isinstance(attacker, dict) and attacker.get('character_id') == character_id:
+                            attacker_info = attacker
+                            break
+                
+                if attacker_info:
+                    ship_id = attacker_info.get('ship_type_id', 0)
+                    ship_name = await self.get_ship_name(ship_id) if ship_id else "Unknown Ship"
+                    
+                    # Формат: Корабль_убийцы -> Имя_жертвы's Корабль_жертвы
+                    victim_display = f"{ship_name} → {victim_name}'s {victim_ship}"
+                else:
+                    ship_name = "Unknown Ship"
+                    victim_display = f"Unknown → {victim_name}'s {victim_ship}"
+            else:
+                # Персонаж - жертва
+                ship_name = victim_ship
+                
+                # Кто убил
+                final_blow_attacker = None
+                attackers = kill.get('attackers', [])
+                if isinstance(attackers, list):
+                    for attacker in attackers:
+                        if isinstance(attacker, dict) and attacker.get('final_blow', False):
+                            final_blow_attacker = attacker
+                            break
+                
+                if final_blow_attacker:
+                    killer_id = final_blow_attacker.get('character_id', 0)
+                    killer_name = await self.get_character_name(killer_id) if killer_id else "Unknown"
+                    killer_ship_id = final_blow_attacker.get('ship_type_id', 0)
+                    killer_ship = await self.get_ship_name(killer_ship_id) if killer_ship_id else "Unknown Ship"
+                    
+                    # Формат: Корабль_жертвы ← Имя_убийцы's Корабль_убийцы
+                    victim_display = f"{ship_name} ← {killer_name}'s {killer_ship}"
+                else:
+                    victim_display = f"{ship_name} ← Unknown"
+            
+            # Форматируем стоимость
+            value = zkb.get('totalValue', 0)
+            if value >= 1_000_000_000:
+                value_str = f"{value/1_000_000_000:.2f}B"
+            elif value >= 1_000_000:
+                value_str = f"{value/1_000_000:.1f}M"
+            elif value >= 1_000:
+                value_str = f"{value/1_000:.1f}K"
+            else:
+                value_str = f"{value:,.0f}"
+            # Добавляем эмодзи для соло/группа
+            solo_emoji = "👤" if is_solo else "👥"
+            
+            result = {
+                "kill_id": killmail_id,
+                "time": formatted_time,
+                "raw_time": kill_time,
+                "system": system_name,
+                "value": value,
+                "value_str": value_str,
+                "ship": ship_name,
+                "victim": victim_display,
+                "is_solo": is_solo,
+                "solo_emoji": solo_emoji,
+                "attackers_count": attackers_count,
+                "zkb_url": f"https://zkillboard.com/kill/{killmail_id}/"
+            }
+            
+            return result
+            
+        except Exception as e:
+            logging.error(f"Ошибка в _analyze_kill: {e}")
+            return None
     
     async def get_character_name(self, character_id: int) -> str:
         """Получает имя персонажа по ID"""
@@ -510,16 +536,13 @@ class CharacterAnalyzer:
                 if resp.status == 200:
                     data = await resp.json()
                     name = data.get('name', f"Char_{character_id}")
-                    # Сохраняем в кеш
                     self.cache["characters"][character_id] = {"name": name, "id": character_id}
                     return name
                 else:
-                    logging.warning(f"ESI вернул {resp.status} для персонажа {character_id}")
                     return f"Char_{character_id}"
-        except Exception as e:
-            logging.error(f"Ошибка получения имени персонажа {character_id}: {e}")
+        except Exception:
             return f"Char_{character_id}"
-
+    
     async def get_ship_name(self, ship_id: int) -> str:
         """Получает название корабля"""
         if ship_id == 0:
@@ -542,7 +565,7 @@ class CharacterAnalyzer:
                     return f"Ship_{ship_id}"
         except Exception:
             return f"Ship_{ship_id}"
-
+    
     async def get_system_name(self, system_id: int) -> str:
         """Получает название системы"""
         if system_id == 0:
@@ -570,20 +593,15 @@ class CharacterAnalyzer:
     async def analyze_characters(self, names_input: str) -> List[Dict]:
         """
         Основной метод анализа списка персонажей
-        Принимает строку с именами (можно скопировать из локала)
         """
-        # Разбиваем входную строку на имена
         lines = names_input.strip().split('\n')
         names = []
         
         for line in lines:
-            # Убираем возможные префиксы из EVE локала
-            # Формат обычно: "Name [corp]" или "Name"
             line = line.strip()
             if not line:
                 continue
             
-            # Пытаемся извлечь имя до первого пробела или скобки
             match = re.match(r'^([^\[\(]+)', line)
             if match:
                 name = match.group(1).strip()
@@ -595,41 +613,49 @@ class CharacterAnalyzer:
         if not names:
             return []
         
-        # Конвертируем имена в ID
         name_to_id = await self.resolve_names_to_ids(names)
         
         if not name_to_id:
             return []
         
-        # Анализируем каждого персонажа
         results = []
         
         for name, char_id in name_to_id.items():
             logging.info(f"Анализирую персонажа: {name} (ID: {char_id})")
             
-            # Получаем базовую информацию
             char_info = await self.get_character_info(char_id)
-            
-            # Получаем активность с zKillboard
             activity = await self.get_zkill_activity(char_id)
             
-            # Формируем результат
+            # СОХРАНЯЕМ ИМЕНА КОРАБЛЕЙ ДЛЯ ЛЮБИМЫХ
+            ship_names = {}
+            fav_ships = activity.get("favorite_ships", {})
+
+            logging.info(f"📊 favorite_ships для {name} (с zKillboard): {dict(fav_ships)}")
+
+            for ship_id in fav_ships.keys():
+                ship_name = await self.get_ship_name(ship_id)
+                ship_names[ship_id] = ship_name
+                kills = fav_ships[ship_id]
+                logging.info(f"  - {ship_name} ({ship_id}): {kills} убийств")
+
+            logging.info(f"  - Всего сохранено имен: {len(ship_names)}")
+            
             result = {
                 "name": name,
                 "id": char_id,
                 "corporation": char_info.get("corporation_name", "Unknown"),
-                "corporation_ticker": char_info.get("corporation_ticker", ""),
+                "corporation_id": char_info.get("corporation_id", 0), 
                 "alliance": char_info.get("alliance_name", "None"),
-                "alliance_ticker": char_info.get("alliance_ticker", ""),
+                "alliance_id": char_info.get("alliance_id", 0),  
                 "security_status": char_info.get("security_status", 0),
                 "birthday": char_info.get("birthday", ""),
-                "activity": activity
+                "activity": activity,
+                "ship_names": ship_names
             }
             
             results.append(result)
             self.stats["analyzed_characters"] += 1
             
-            # Небольшая задержка, чтобы не нагружать API
             await asyncio.sleep(0.5)
         
         return results
@@ -645,71 +671,160 @@ class CharacterAnalyzer:
         
         for result in results:
             name = result["name"]
+            char_id = result["id"]
             corp = result["corporation"]
-            corp_ticker = result["corporation_ticker"]
+            corp_id = result.get("corporation_id", 0)
             alliance = result["alliance"]
+            alliance_id = result.get("alliance_id", 0)
             sec_status = result["security_status"]
+            ship_names = result.get("ship_names", {})
+ 
+            # Ссылки на zKillboard
+            zkill_char_link = f"<https://zkillboard.com/character/{char_id}/>"
+            zkill_corp_link = f"<https://zkillboard.com/corporation/{corp_id}/>" if corp_id else ""
+            zkill_alliance_link = f"<https://zkillboard.com/alliance/{alliance_id}/>" if alliance_id and alliance_id != 0 else ""
             
-            # Заголовок
+                       
             sec_emoji = "🟢" if sec_status >= 0 else "🔴"
-            lines.append(f"\n**{sec_emoji} {name}**")
+            lines.append(f"\n**{sec_emoji} [{name}]({zkill_char_link})**")
             
-            # Корпорация/альянс
-            if corp_ticker:
-                lines.append(f"🏢 {corp} [{corp_ticker}]")
-            else:
-                lines.append(f"🏢 {corp}")
+
             
-            if alliance != "None":
-                lines.append(f"🌐 {alliance}")
+            if corp_id:
+                lines.append(f"🏢 [{corp}]({zkill_corp_link})")
+                        
+            if alliance_id:
+                lines.append(f"🌐 [{alliance}]({zkill_alliance_link})")
             
-            # Статистика активности
+            
+            # === ДОБАВЛЯЕМ СТАТИСТИКУ С ZKILLBOARD ===
+            # Статистика из zKillboard
             activity = result["activity"]
-            total_kills = activity.get("total_kills", 0)
-            total_losses = activity.get("total_losses", 0)
-            solo = activity.get("solo_kills", 0)
-            gang = activity.get("gang_kills", 0)
-            
-            lines.append(f"⚔️ Kills: {total_kills} | 💀 Losses: {total_losses}")
-            if total_kills > 0:
-                solo_pct = (solo / total_kills) * 100 if total_kills > 0 else 0
-                lines.append(f"🎯 Solo: {solo} ({solo_pct:.0f}%) | Group: {gang}")
+            stats_data = activity.get("stats", {})
+
+            # Проверяем наличие данных
+            ships_destroyed = stats_data.get('shipsDestroyed', 0)
+            ships_lost = stats_data.get('shipsLost', 0)
+            isk_destroyed = stats_data.get('iskDestroyed', 0)
+            isk_lost = stats_data.get('iskLost', 0)
+
+            if ships_destroyed > 0 or ships_lost > 0:
+                # Рассчитываем эффективность
+                if ships_destroyed + ships_lost > 0:
+                    efficiency = (ships_destroyed / (ships_destroyed + ships_lost)) * 100
+                else:
+                    efficiency = 0
+                
+                # Создаем прогресс-бар
+                bar_length = 10
+                filled = int((efficiency / 100) * bar_length)
+                
+                # Выбираем цвет и эмодзи в зависимости от эффективности
+                if efficiency >= 90:
+                    danger_emoji = "💀💀💀"
+                    bar_color = "🟥"  # красный для очень опасных
+                elif efficiency >= 75:
+                    danger_emoji = "💀💀"
+                    bar_color = "🟧"  # оранжевый
+                elif efficiency >= 60:
+                    danger_emoji = "💀"
+                    bar_color = "🟨"  # желтый
+                elif efficiency >= 40:
+                    danger_emoji = "⚠️"
+                    bar_color = "🟩"  # зеленый
+                else:
+                    danger_emoji = "🌱"
+                    bar_color = "⬜"  # белый для безопасных
+                
+                # Создаем полоску
+                bar = bar_color * filled + "⬜" * (bar_length - filled)
+                
+                lines.append(f"\n📊 **STATISTICS (All Time)**")
+                lines.append(f"├ Ships Destroyed: **{ships_destroyed:,}** | Ships Lost: **{ships_lost:,}**")
+                lines.append(f"├ ISK Destroyed: **{self.format_isk(isk_destroyed)}** | ISK Lost: **{self.format_isk(isk_lost)}**")
+                lines.append(f"└ **Dangerous:** {danger_emoji} {bar} {efficiency:.1f}%")
+                
+                # Соло статистика из zKillboard
+                solo_kills = activity.get("solo_kills", 0)  # 568
+                total_kills_all = activity.get("total_kills", 0)  # 1360
+                
+                if total_kills_all > 0:
+                    gang_kills = total_kills_all - solo_kills  # 1360 - 568 = 792
+                    
+                    solo_percent = (solo_kills / total_kills_all) * 100
+                    gang_percent = 100 - solo_percent
+                                        
+                    lines.append(f"🎯 **Solo:** {solo_kills} ({solo_percent:.0f}%) | **Group:** {gang_kills} ({gang_percent:.0f}%)")
+                    
+                    logging.info(f"🎯 Соло статистика: {solo_kills}/{total_kills_all} ({solo_percent:.1f}%)")
+                else:
+                    lines.append("🎯 **Solo:** 0 (0%) | **Group:** 0 (0%)")
             
             # Любимые корабли
             fav_ships = activity.get("favorite_ships", {})
             if fav_ships:
-                # Берем топ-3
-                top_ships = sorted(fav_ships.items(), key=lambda x: x[1], reverse=True)[:3]
+                top_ships = sorted(fav_ships.items(), key=lambda x: x[1], reverse=True)[:5]
                 ships_text = []
                 for ship_id, count in top_ships:
-                    # Здесь нужно получить имя корабля, но у нас нет ship_id в контексте
-                    # Временно используем ID
-                    ships_text.append(f"Ship_{ship_id}: {count}")
-                lines.append(f"🚀 Fav: {', '.join(ships_text)}")
+                    ship_name = ship_names.get(ship_id, f"Ship_{ship_id}")
+                    ships_text.append(f"**{ship_name}**: {count}")
+                lines.append(f"\n🚀 Top Ships:  {',  '.join(ships_text)}")
             
-            # Последние киллы/потери
+            # Последние убийства
             if activity.get("kills"):
-                lines.append("**Последние убийства:**")
-                for kill in activity["kills"][:2]:  # Показываем только 2
-                    value = kill.get("value", 0)
-                    val_str = f"{value/1e9:.2f}B" if value >= 1e9 else f"{value/1e6:.1f}M"
-                    lines.append(f"  • {kill['victim']} in {kill['ship']} | {val_str} ISK | {kill['system']}")
+                lines.append(f"\n**Recent Kills (last {len(activity['kills'])}):**")
+                for kill in activity["kills"]:
+                    solo_emoji = kill.get('solo_emoji', '👥')
+                    kill_time = kill.get('time', 'Unknown')
+                    # Разбиваем victim_display на части и выделяем корабли жирным
+                    victim_parts = kill['victim'].split('→')
+                    if len(victim_parts) == 2:
+                        killer_ship = victim_parts[0].strip()
+                        victim_part = victim_parts[1].strip()
+                        # Выделяем корабли жирным
+                        formatted_kill = f"**{killer_ship}** → {victim_part}"
+                    else:
+                        formatted_kill = kill['victim']
+                    
+                    lines.append(f"  • `{kill_time}`  {solo_emoji} {formatted_kill} | {kill['value_str']} ISK | {kill['system']}")
             
+            # Последние потери
             if activity.get("losses"):
-                lines.append("**Последние потери:**")
-                for loss in activity["losses"][:2]:
-                    value = loss.get("value", 0)
-                    val_str = f"{value/1e9:.2f}B" if value >= 1e9 else f"{value/1e6:.1f}M"
-                    lines.append(f"  • {loss['ship']} | {val_str} ISK | {loss['system']}")
-            
-            lines.append("---")
+                lines.append(f"\n**Recent Losses (last {len(activity['losses'])}):**")
+                for loss in activity["losses"]:
+                    solo_emoji = loss.get('solo_emoji', '👥')
+                    loss_time = loss.get('time', 'Unknown')
+                    # Разбиваем victim_display на части и выделяем корабли жирным
+                    victim_parts = loss['victim'].split('←')
+                    if len(victim_parts) == 2:
+                        victim_ship = victim_parts[0].strip()
+                        killer_part = victim_parts[1].strip()
+                        # Выделяем корабли жирным
+                        formatted_loss = f"**{victim_ship}** ← {killer_part}"
+                    else:
+                        formatted_loss = loss['victim']
+                    
+                    lines.append(f"  • `{loss_time}`  {solo_emoji} {formatted_loss} | {loss['value_str']} ISK | {loss['system']}")
+                        
+            lines.append("\n---")
         
         return "\n".join(lines)
     
+    def format_isk(self, value: float) -> str:
+        """Форматирует ISK"""
+        if value >= 1_000_000_000_000:
+            return f"{value/1_000_000_000_000:.2f}T"
+        elif value >= 1_000_000_000:
+            return f"{value/1_000_000_000:.2f}B"
+        elif value >= 1_000_000:
+            return f"{value/1_000_000:.1f}M"
+        elif value >= 1_000:
+            return f"{value/1_000:.1f}K"
+        else:
+            return f"{value:,.0f}"
+    
     def get_stats(self) -> Dict:
-        """
-        Возвращает статистику работы модуля
-        """
+        """Возвращает статистику работы модуля"""
         return {
             **self.stats,
             "cache_size": sum(len(v) for v in self.cache.values())
