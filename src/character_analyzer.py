@@ -262,19 +262,23 @@ class CharacterAnalyzer:
         
         # Получаем топ корабли из stats zKillboard
         favorite_ships_alltime = Counter()
-        if stats_data and 'topAllTime' in stats_data:
+        if stats_data and 'topAllTime' in stats_data and stats_data['topAllTime'] is not None:
             for item in stats_data['topAllTime']:
                 if item.get('type') == 'ship':
                     ships_data = item.get('data', [])
-                    logging.info(f"📊 Получено {len(ships_data)} топ кораблей с zKillboard")
-                    for ship in ships_data[:10]:  # Берем топ-10
-                        ship_id = ship.get('shipTypeID')
-                        kills = ship.get('kills', 0)
-                        if ship_id:
-                            favorite_ships_alltime[ship_id] = kills
-                            logging.info(f"  - Корабль {ship_id}: {kills} убийств")
+                    if ships_data:  # Проверяем что данные не пустые
+                        logging.info(f"📊 Получено {len(ships_data)} топ кораблей с zKillboard")
+                        for ship in ships_data[:10]:  # Берем топ-10
+                            ship_id = ship.get('shipTypeID')
+                            kills = ship.get('kills', 0)
+                            if ship_id:
+                                favorite_ships_alltime[ship_id] = kills
+                                logging.info(f"  - Корабль {ship_id}: {kills} убийств")
+                    else:
+                        logging.info("📊 Нет данных о топ кораблях")
                     break
-        
+        else:
+            logging.info("📊 Нет данных topAllTime в статистике")
         
         try:
             async with self.session.get(kills_url) as resp:
