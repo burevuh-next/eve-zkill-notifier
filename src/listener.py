@@ -16,7 +16,9 @@ async def start_listener(data_queue, config):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
         "Origin": "https://zkillboard.com",
-        "Referer": "https://zkillboard.com/"
+        "Referer": "https://zkillboard.com/",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
     }
 
     logging.info("🔗 Подключение к WebSocket zKillboard...")
@@ -28,7 +30,14 @@ async def start_listener(data_queue, config):
 
         while True:
             try:
-                async with session.ws_connect(uri, headers=ws_headers) as websocket:
+                # Используем aiohttp для WebSocket вместо websockets
+                async with session.ws_connect(
+                    uri, 
+                    headers=ws_headers,
+                    heartbeat=30,
+                    compress=15,
+                    max_msg_size=10 * 1024 * 1024
+                ) as websocket:
                     reconnect_delay = 5
                     logging.info("✅ Успешное подключение к zKillboard WebSocket")
 
@@ -112,6 +121,14 @@ async def start_listener(data_queue, config):
                         elif msg.type == aiohttp.WSMsgType.ERROR:
                             logging.error(f"Ошибка WebSocket: {websocket.exception()}")
                             break
+
+            except aiohttp.ClientResponseError as e:
+                if e.status == 403:
+                    logging.error(f"❌ Доступ запрещен (403). Возможно, IP заблокирован. Переподключение через {reconnect_delay} сек...")
+                else:
+                    logging.warning(f"⚠️ Ошибка ответа {e.status}: {e}. Переподключение через {reconnect_delay} сек...")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, max_delay)
 
             except aiohttp.ClientError as e:
                 logging.warning(f"⚠️ Ошибка соединения: {e}. Переподключение через {reconnect_delay} сек...")
