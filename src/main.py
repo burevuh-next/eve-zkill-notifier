@@ -50,7 +50,7 @@ load_dotenv()
 
 from character_analyzer import get_character_analyzer
 from image_generator_large import get_generator, start_cleanup, stop_cleanup
-from listener import start_listener
+from r2z2 import r2z2_loop
 from processor import start_processor, get_processor_stats
 from discord_utils import bot, load_subs
 from monitoring import monitor
@@ -68,7 +68,7 @@ def get_current_config():
         global_ids = {
             "corps": set(), "systems": set(), "regions": set(),
             "ships": set(), "ping_sys": set(), "ping_ship": set(),
-            "chars": set(), "consts": set()
+            "chars": set(), "consts": set(), "alliances": set(),
         }
         
         for ch_id, ch_data in subs.items():
@@ -113,7 +113,7 @@ async def run_zkill_tasks(shared_queue):
 
             logging.info(f"🚀 Starting workers for {len(config['all_subs'])} channels")
 
-            listener_task = asyncio.create_task(start_listener(shared_queue, config))
+            listener_task = asyncio.create_task(r2z2_loop(shared_queue, config))
             processor_task = asyncio.create_task(start_processor(shared_queue, config))
             
             bot.config_updated = False
