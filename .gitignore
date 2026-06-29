@@ -16,3 +16,9 @@ subscriptions.json
 .idea/.env
 image_cache/
 killmail_images/
+.env
+subscriptions.json
+killbot.log
+logs/
+killmail_images/
+image_cache/
