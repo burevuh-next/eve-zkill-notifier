@@ -666,6 +666,252 @@ class LargeKillImageGenerator:
         
         return output_path
     
+    async def generate_character_analysis_image(self, session, char_data, ship_names=None):
+        """Генерация изображения для анализа персонажа"""
+        import time
+        start_time = time.time()
+        ship_names = ship_names or {}
+
+        try:
+            char_id = char_data.get("id", 0)
+            name = char_data.get("name", "Unknown")
+            corp = char_data.get("corporation", "Unknown Corp")
+            corp_id = char_data.get("corporation_id", 0)
+            alliance = char_data.get("alliance", "None")
+            sec_status = char_data.get("security_status", 0)
+            activity = char_data.get("activity", {})
+            stats_data = activity.get("stats", {})
+
+            ships_destroyed = stats_data.get("shipsDestroyed", 0)
+            ships_lost = stats_data.get("shipsLost", 0)
+            isk_destroyed = stats_data.get("iskDestroyed", 0)
+            isk_lost = stats_data.get("iskLost", 0)
+            solo_kills = activity.get("solo_kills", 0)
+            total_kills = activity.get("total_kills", 0)
+            total_losses = activity.get("total_losses", 0)
+
+            if ships_destroyed + ships_lost > 0:
+                efficiency = (ships_destroyed / (ships_destroyed + ships_lost)) * 100
+            else:
+                efficiency = 0
+
+            fav_ships = activity.get("favorite_ships", {})
+            top_ships = sorted(fav_ships.items(), key=lambda x: x[1], reverse=True)[:5]
+
+            download_tasks = []
+            task_names = []
+
+            v_portrait_task = self.download_image(
+                session,
+                f"https://images.evetech.net/characters/{char_id}/portrait?size=128",
+                f"portraits/char_{char_id}.png",
+                size=(128, 128)
+            )
+            download_tasks.append(v_portrait_task)
+            task_names.append("v_portrait")
+
+            if corp_id:
+                v_logo_task = self.download_image(
+                    session,
+                    f"https://images.evetech.net/corporations/{corp_id}/logo?size=64",
+                    f"corp_logos/corp_{corp_id}.png",
+                    size=(64, 64)
+                )
+                download_tasks.append(v_logo_task)
+                task_names.append("v_logo")
+            else:
+                download_tasks.append(None)
+                task_names.append(None)
+
+            top_ship_ids = [sid for sid, _ in top_ships]
+            ship_render_tasks = []
+            for ship_id in top_ship_ids:
+                task = self.download_image(
+                    session,
+                    f"https://images.evetech.net/types/{ship_id}/icon?size=64",
+                    f"renders/icon_{ship_id}.png",
+                    size=(48, 48)
+                )
+                ship_render_tasks.append(task)
+
+            valid_tasks = [t for t in download_tasks if t is not None] + ship_render_tasks
+            if valid_tasks:
+                results = await asyncio.gather(*valid_tasks, return_exceptions=True)
+
+                result_index = 0
+                portrait_result = None
+                logo_result = None
+                ship_icon_results = []
+
+                for i, task_name in enumerate(task_names):
+                    if task_name == "v_portrait":
+                        portrait_result = results[result_index] if result_index < len(results) else None
+                        result_index += 1
+                    elif task_name == "v_logo":
+                        logo_result = results[result_index] if result_index < len(results) else None
+                        result_index += 1
+
+                for _ in range(len(ship_render_tasks)):
+                    r = results[result_index] if result_index < len(results) else None
+                    if r and not isinstance(r, Exception):
+                        ship_icon_results.append(r)
+                    else:
+                        ship_icon_results.append(None)
+                    result_index += 1
+            else:
+                portrait_result = None
+                logo_result = None
+                ship_icon_results = [None] * len(top_ship_ids)
+
+            portrait = portrait_result if portrait_result and not isinstance(portrait_result, Exception) else None
+            logo = logo_result if logo_result and not isinstance(logo_result, Exception) else None
+
+            generate_func = partial(
+                self._generate_character_image_sync,
+                portrait=portrait,
+                logo=logo,
+                name=name,
+                corp=corp,
+                alliance=alliance,
+                sec_status=sec_status,
+                ships_destroyed=ships_destroyed,
+                ships_lost=ships_lost,
+                isk_destroyed=isk_destroyed,
+                isk_lost=isk_lost,
+                efficiency=efficiency,
+                solo_kills=solo_kills,
+                total_kills=total_kills,
+                total_losses=total_losses,
+                top_ships=top_ships,
+                ship_icon_results=ship_icon_results,
+                ship_names=ship_names,
+                char_id=char_id,
+            )
+
+            output_path = await asyncio.to_thread(generate_func)
+
+            elapsed = time.time() - start_time
+            self.stats["images_generated"] += 1
+            self.stats["total_generation_time"] += elapsed
+
+            logging.info(f"✅ Character analysis image generated in {elapsed:.2f}s: {output_path}")
+            return output_path
+
+        except Exception as e:
+            logging.error(f"❌ Error generating character analysis image: {e}", exc_info=True)
+            return None
+
+    def _generate_character_image_sync(self, portrait, logo, name, corp, alliance, sec_status,
+                                        ships_destroyed, ships_lost, isk_destroyed, isk_lost,
+                                        efficiency, solo_kills, total_kills, total_losses,
+                                        top_ships, ship_icon_results, ship_names, char_id):
+        """Синхронная генерация изображения анализа персонажа"""
+        width = 800
+        height = 600
+
+        img = Image.new('RGBA', (width, height), self.colors['bg_dark'])
+        draw = ImageDraw.Draw(img, 'RGBA')
+
+        for y in range(height):
+            ratio = y / height
+            r = int(self.colors['bg_gradient_start'][0] * (1 - ratio) + self.colors['bg_gradient_end'][0] * ratio)
+            g = int(self.colors['bg_gradient_start'][1] * (1 - ratio) + self.colors['bg_gradient_end'][1] * ratio)
+            b = int(self.colors['bg_gradient_start'][2] * (1 - ratio) + self.colors['bg_gradient_end'][2] * ratio)
+            draw.line([(0, y), (width, y)], fill=(r, g, b, 255))
+
+        if sec_status >= 0:
+            sec_color = self.colors['accent_green']
+            sec_label = "SECURE"
+        else:
+            sec_color = self.colors['accent_red']
+            sec_label = "DANGEROUS"
+
+        self.draw_rounded_rect(draw, (25, 20, 170, 55), radius=8, fill=sec_color + (40,), outline=sec_color, width=2)
+        draw.text((50, 27), sec_label, font=self.font_small, fill=sec_color)
+
+        sec_text = f"Sec: {sec_status:+.1f}"
+        bbox = draw.textbbox((0, 0), sec_text, font=self.font_normal)
+        draw.text((width - bbox[2] - 30, 27), sec_text, font=self.font_normal, fill=self.colors['text_secondary'])
+
+        if portrait:
+            self.draw_rounded_rect(draw, (30, 80, 158, 208), radius=12, fill=self.colors['bg_card'] + (200,), outline=self.colors['border'], width=2)
+            img.paste(portrait, (38, 88), portrait)
+
+        text_x = 180
+        draw.text((text_x, 85), name, font=self.font_large, fill=self.colors['text_white'])
+        draw.text((text_x, 130), corp, font=self.font_medium, fill=self.colors['text_secondary'])
+        if alliance and alliance != "None":
+            draw.text((text_x, 165), alliance, font=self.font_normal, fill=self.colors['accent_purple'])
+
+        if logo:
+            img.paste(logo, (text_x, 195), logo)
+
+        self.draw_rounded_rect(draw, (20, 240, width - 40, 242), radius=1, fill=self.colors['border'] + (150,))
+
+        if efficiency >= 90:
+            danger_emoji_color = self.colors['accent_red']
+        elif efficiency >= 75:
+            danger_emoji_color = (255, 165, 0)
+        elif efficiency >= 60:
+            danger_emoji_color = self.colors['accent_gold']
+        elif efficiency >= 40:
+            danger_emoji_color = self.colors['accent_green']
+        else:
+            danger_emoji_color = self.colors['text_muted']
+
+        stats_y = 260
+        draw.text((30, stats_y), "STATISTICS (All Time)", font=self.font_medium, fill=self.colors['accent_cyan'])
+
+        stats_y += 40
+        draw.text((30, stats_y), f"Ships Destroyed: {ships_destroyed:,}", font=self.font_normal, fill=self.colors['text_primary'])
+        draw.text((400, stats_y), f"Ships Lost: {ships_lost:,}", font=self.font_normal, fill=self.colors['text_primary'])
+
+        stats_y += 30
+        draw.text((30, stats_y), f"ISK Destroyed: {self.format_isk(isk_destroyed)}", font=self.font_normal, fill=self.colors['accent_green'])
+        draw.text((400, stats_y), f"ISK Lost: {self.format_isk(isk_lost)}", font=self.font_normal, fill=self.colors['accent_red'])
+
+        stats_y += 35
+        bar_length = 300
+        bar_x = 30
+        filled = int((efficiency / 100) * bar_length)
+        if filled > 0:
+            draw.rectangle((bar_x, stats_y, bar_x + filled, stats_y + 16), fill=danger_emoji_color)
+        draw.rectangle((bar_x + filled, stats_y, bar_x + bar_length, stats_y + 16), fill=self.colors['text_muted'] + (60,))
+        eff_text = f"Efficiency: {efficiency:.1f}%"
+        draw.text((bar_x + bar_length + 15, stats_y - 2), eff_text, font=self.font_normal, fill=self.colors['text_white'])
+
+        stats_y += 30
+        if total_kills > 0:
+            gang_kills = total_kills - solo_kills
+            solo_pct = (solo_kills / total_kills) * 100
+            draw.text((30, stats_y), f"Solo: {solo_kills} ({solo_pct:.0f}%)", font=self.font_normal, fill=self.colors['accent_gold'])
+            draw.text((300, stats_y), f"Group: {gang_kills} ({100 - solo_pct:.0f}%)", font=self.font_normal, fill=self.colors['text_secondary'])
+
+        if top_ships:
+            stats_y += 40
+            self.draw_rounded_rect(draw, (20, stats_y - 10, width - 40, stats_y + 8 + len(top_ships) * 30),
+                                   radius=10, fill=self.colors['bg_card'] + (150,), outline=self.colors['border'], width=1)
+            draw.text((30, stats_y), "TOP SHIPS", font=self.font_medium, fill=self.colors['accent_gold'])
+            stats_y += 35
+            for i, (ship_id, count) in enumerate(top_ships):
+                ship_name = ship_names.get(ship_id, f"Ship_{ship_id}")
+                icon = ship_icon_results[i] if i < len(ship_icon_results) else None
+                if icon:
+                    img.paste(icon, (40, stats_y + i * 30), icon)
+                    draw.text((100, stats_y + i * 30 + 4), f"{ship_name}", font=self.font_normal, fill=self.colors['text_primary'])
+                else:
+                    draw.text((40, stats_y + i * 30 + 4), f"{ship_name}", font=self.font_normal, fill=self.colors['text_primary'])
+                draw.text((width - 80, stats_y + i * 30 + 4), str(count), font=self.font_normal, fill=self.colors['text_secondary'])
+
+        draw.text((width - 120, 15), "EVE KillBot", font=self.font_tiny, fill=self.colors['text_muted'] + (128,))
+
+        output_path = os.path.join(self.output_dir, f"analysis_{char_id}.png")
+        img_rgb = Image.new('RGB', img.size, self.colors['bg_dark'])
+        img_rgb.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+        img_rgb.save(output_path, 'PNG', quality=95)
+
+        return output_path
+
     def get_stats(self):
         """Возвращает статистику генератора"""
         avg_time = 0

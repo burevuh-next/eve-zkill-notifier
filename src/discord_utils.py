@@ -178,6 +178,7 @@ async def help_command(ctx):
     embed.add_field(name="Filters", value="`!add/remove [type] [ID]`\nTypes: system, region, const, ship, corp, char", inline=False)
     embed.add_field(name="Priority", value="`!add ping_sys [ID]` | `!add ping_ship [ID]`", inline=False)
     embed.add_field(name="Monitoring", value="`!monitor` - статистика ресурсов", inline=False)
+    embed.add_field(name="Analysis", value="`!analyze <names>` - текстовый анализ\n`!analyzeimg <names>` - анализ с изображением", inline=False)
     await ctx.send(embed=embed)
 
 @commands.command(name="init")
@@ -484,6 +485,66 @@ async def analyze_characters(ctx, *, names_text: str = None):
         analyzer = get_character_analyzer()
         await analyzer.close_session()
 
+@commands.command(name="analyzeimg", aliases=["ai", "whoimg"])
+async def analyze_characters_image(ctx, *, names_text: str = None):
+    """
+    Анализирует персонажей и отправляет результат в виде изображения
+    Пример: !analyzeimg <скопированные имена из локала>
+    """
+    if not names_text:
+        await ctx.send("❌ Укажите имена для анализа.\nПример: `!analyzeimg` и вставьте список")
+        return
+
+    msg = await ctx.send(f"🖼️ Анализирую и генерирую изображения для {len(names_text.splitlines())} персонажей...")
+
+    try:
+        analyzer = get_character_analyzer()
+        await analyzer.ensure_session()
+
+        results = await analyzer.analyze_characters(names_text)
+
+        if not results:
+            await msg.edit(content="❌ Не удалось найти ни одного персонажа.")
+            return
+
+        if not IMAGE_GENERATION_ENABLED:
+            await msg.edit(content="❌ Генератор изображений отключен")
+            return
+
+        generator = get_generator()
+
+        for result in results:
+            char_data = {
+                "id": result["id"],
+                "name": result["name"],
+                "corporation": result["corporation"],
+                "corporation_id": result.get("corporation_id", 0),
+                "alliance": result["alliance"],
+                "security_status": result["security_status"],
+                "activity": result["activity"],
+            }
+
+            await msg.edit(content=f"🖼️ Генерирую изображение для {result['name']}...")
+
+            image_path = await generator.generate_character_analysis_image(
+                bot.session, char_data, result.get("ship_names", {})
+            )
+
+            if image_path and os.path.exists(image_path):
+                file = discord.File(image_path, filename=f"analysis_{result['id']}.png")
+                await ctx.send(file=file)
+            else:
+                await ctx.send(f"❌ Не удалось сгенерировать изображение для {result['name']}")
+
+        await msg.edit(content=f"✅ Анализ завершен. Обработано {len(results)} персонажей.")
+
+    except Exception as e:
+        await msg.edit(content=f"❌ Ошибка при анализе: {str(e)}")
+        logging.error(f"Ошибка в analyze_characters_image: {e}", exc_info=True)
+    finally:
+        analyzer = get_character_analyzer()
+        await analyzer.close_session()
+
 @commands.command(name="analyze_stats")
 async def analyzer_stats(ctx):
     """Показывает статистику работы анализатора"""
@@ -506,6 +567,7 @@ async def analyzer_stats(ctx):
 
 # Регистрируем команды
 bot.add_command(analyze_characters)
+bot.add_command(analyze_characters_image)
 bot.add_command(analyzer_stats)
 bot.add_command(image_clean)
 bot.add_command(help_command)

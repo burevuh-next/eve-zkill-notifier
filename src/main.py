@@ -1,66 +1,70 @@
-import asyncio
 import logging
+import sys
+import asyncio
 import os
 import signal
 import logging.handlers
-import re
-from character_analyzer import get_character_analyzer
 
+# === НАСТРОЙКА ЛОГИРОВАНИЯ В ФАЙЛ И КОНСОЛЬ ===
+LOG_DIR = "logs"
+if not os.path.exists(LOG_DIR):
+    os.makedirs(LOG_DIR)
 
-analyzer = get_character_analyzer()
+log_formatter = logging.Formatter(
+    '%(asctime)s | %(levelname)-8s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
+# Файловый обработчик с ротацией
+file_handler = logging.handlers.RotatingFileHandler(
+    os.path.join(LOG_DIR, 'killbot.log'),
+    maxBytes=10*1024*1024,  # 10 МБ
+    backupCount=5,
+    encoding='utf-8'
+)
+file_handler.setFormatter(log_formatter)
 
-# === НАСТРОЙКА ЛОГИРОВАНИЯ ===
-def setup_logging():
-    """Настройка логирования - вызывается до всех импортов"""
-    log_formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(message)s',
-        datefmt='%H:%M:%S'
-    )
-    
-    file_handler = logging.handlers.RotatingFileHandler(
-        'killbot.log',
-        maxBytes=10*1024*1024,
-        backupCount=5,
-        encoding='utf-8'
-    )
-    file_handler.setFormatter(log_formatter)
-    
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(log_formatter)
-    
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    
-    if not root_logger.handlers:
-        root_logger.addHandler(file_handler)
-        root_logger.addHandler(console_handler)
-    
-    logging.getLogger('discord').setLevel(logging.WARNING)
-    logging.getLogger('websockets').setLevel(logging.WARNING)
+# Консольный обработчик
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(log_formatter)
 
-setup_logging()
+# Настройка корневого логгера
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
 
-# === ИМПОРТЫ ===
+# Удаляем существующие хендлеры, чтобы избежать дублирования
+if root_logger.handlers:
+    root_logger.handlers.clear()
+
+root_logger.addHandler(file_handler)
+root_logger.addHandler(console_handler)
+
+# Устанавливаем уровень для некоторых библиотек
+logging.getLogger('discord').setLevel(logging.WARNING)
+logging.getLogger('websockets').setLevel(logging.WARNING)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+# ============================================
+
 from dotenv import load_dotenv
 load_dotenv()
+
+from character_analyzer import get_character_analyzer
 from image_generator_large import get_generator, start_cleanup, stop_cleanup
 from listener import start_listener
 from processor import start_processor, get_processor_stats
 from discord_utils import bot, load_subs
 from monitoring import monitor
 
+analyzer = get_character_analyzer()
 shutdown_event = asyncio.Event()
 
 def get_current_config():
-    """Загружает и оптимизирует конфигурацию"""
     try:
         subs = load_subs()
         if not subs:
             logging.warning("subscriptions.json is empty or not found!")
             return None
         
-        # Оптимизация: сразу создаем сеты для быстрой проверки в парсере
         global_ids = {
             "corps": set(), "systems": set(), "regions": set(),
             "ships": set(), "ping_sys": set(), "ping_ship": set(),
@@ -70,12 +74,10 @@ def get_current_config():
         for ch_id, ch_data in subs.items():
             for key in global_ids.keys():
                 if key in ch_data and isinstance(ch_data[key], list):
-                    # Конвертируем в int и добавляем в сет
                     global_ids[key].update(int(x) for x in ch_data[key] if str(x).isdigit())
         
-        # Создаем оптимизированный конфиг с сетами для парсера
         config = {
-            "filter_sets": global_ids,  # Готовые сеты для быстрой проверки
+            "filter_sets": global_ids,
             "all_subs": subs,
             "min_value": float(os.getenv("MIN_VALUE", 1_000_000))
         }
@@ -98,10 +100,8 @@ async def run_zkill_tasks(shared_queue):
 
     logging.info("✅ Discord bot ready")
     
-    # Запускаем очистку изображений
     await start_cleanup()
     
-    # Используем контекстный менеджер для мониторинга
     async with monitor:
         while not shutdown_event.is_set():
             config = get_current_config()
@@ -164,7 +164,6 @@ async def run_zkill_tasks(shared_queue):
     await stop_cleanup()
     logging.info("📊 Monitoring system stopped")
 
-
 async def main():
     queue_size = int(os.getenv("QUEUE_MAX_SIZE", 200))
     shared_queue = asyncio.Queue(maxsize=queue_size)
@@ -178,7 +177,6 @@ async def main():
         logging.info("🛑 Shutdown signal received")
         shutdown_event.set()
     
-    # Настройка обработчиков сигналов
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)

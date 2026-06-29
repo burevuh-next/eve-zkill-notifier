@@ -11,7 +11,6 @@ async def start_listener(data_queue, config):
     reconnect_delay = 5
     max_delay = 300
 
-    # Заголовки для WebSocket (имитируем браузер)
     ws_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
@@ -30,7 +29,6 @@ async def start_listener(data_queue, config):
 
         while True:
             try:
-                # Используем aiohttp для WebSocket вместо websockets
                 async with session.ws_connect(
                     uri, 
                     headers=ws_headers,
@@ -41,10 +39,7 @@ async def start_listener(data_queue, config):
                     reconnect_delay = 5
                     logging.info("✅ Успешное подключение к zKillboard WebSocket")
 
-                    # Получаем сеты фильтров из оптимизированного конфига
                     filter_sets = config.get("filter_sets", {})
-
-                    # Собираем все каналы для подписки
                     channels = []
                     for sys_id in filter_sets.get("ping_sys", []):
                         channels.append(f"system:{sys_id}")
@@ -63,14 +58,12 @@ async def start_listener(data_queue, config):
                     for char_id in filter_sets.get("chars", []):
                         channels.append(f"character:{char_id}")
 
-                    # Убираем дубликаты
                     channels = list(set([c for c in channels if ":" in c]))
                     if "killstream" not in channels:
                         channels.insert(0, "killstream")
 
                     logging.info(f"📡 Всего каналов для подписки: {len(channels)}")
 
-                    # Подписываемся на killstream первым
                     await websocket.send_json({"action": "sub", "channel": "killstream"})
                     await asyncio.sleep(0.5)
                     logging.info("✅ Подписка на killstream установлена")
@@ -92,7 +85,6 @@ async def start_listener(data_queue, config):
 
                     logging.info(f"✅ Подписки завершены: {subscribed} успешно, {errors} ошибок")
 
-                    # Основной цикл обработки сообщений
                     async for msg in websocket:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             try:
@@ -106,10 +98,9 @@ async def start_listener(data_queue, config):
                                 if data_queue.qsize() >= data_queue.maxsize:
                                     logging.warning(f"⚠️ Очередь переполнена ({data_queue.qsize()}). Пропускаю KillID: {k_id}")
                                     continue
-                                logging.info(f"📡 [LISTENER] Получен KillID: {k_id}. Добавляю в очередь...")
+                                # Убрали лишние логи, оставили только при ошибке или переполнении
                                 try:
                                     await asyncio.wait_for(data_queue.put(data), timeout=5.0)
-                                    logging.info(f"✅ [LISTENER] KillID {k_id} добавлен. Размер очереди: {data_queue.qsize()}")
                                 except asyncio.TimeoutError:
                                     logging.error(f"❌ Таймаут при добавлении {k_id} в очередь")
                             else:
@@ -124,7 +115,7 @@ async def start_listener(data_queue, config):
 
             except aiohttp.ClientResponseError as e:
                 if e.status == 403:
-                    logging.error(f"❌ Доступ запрещен (403). Возможно, IP заблокирован. Переподключение через {reconnect_delay} сек...")
+                    logging.error(f"❌ Доступ запрещен (403). Переподключение через {reconnect_delay} сек...")
                 else:
                     logging.warning(f"⚠️ Ошибка ответа {e.status}: {e}. Переподключение через {reconnect_delay} сек...")
                 await asyncio.sleep(reconnect_delay)
