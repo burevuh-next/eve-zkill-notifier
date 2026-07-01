@@ -189,13 +189,38 @@ class ResourceMonitor:
         """Выход из контекстного менеджера"""
         await self.stop()
     
+    def _get_disk_usage_mb(self) -> float:
+        """Возвращает размер папки проекта в МБ"""
+        total = 0.0
+        base = os.path.dirname(os.path.abspath(__file__))  # src/
+        project_root = os.path.dirname(base)  # eve_open/
+        for dirpath, dirnames, filenames in os.walk(project_root):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                try:
+                    total += os.path.getsize(fp)
+                except OSError:
+                    pass
+        return round(total / 1024 / 1024, 1)
+
     def get_stats(self) -> Dict[str, Any]:
         """Возвращает текущую статистику в виде словаря"""
+        current_memory_mb = 0.0
+        current_cpu = 0.0
+        if self._process:
+            try:
+                current_memory_mb = self._process.memory_info().rss / 1024 / 1024
+                current_cpu = self._process.cpu_percent(interval=0)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
         return {
             "uptime": self.stats.uptime,
             "connections_peak": self.stats.connections_peak,
             "memory_peak_mb": round(self.stats.memory_peak_mb, 1),
+            "memory_current_mb": round(current_memory_mb, 1),
             "cpu_peak_percent": round(self.stats.cpu_peak_percent, 1),
+            "cpu_current_percent": round(current_cpu, 1),
+            "disk_usage_mb": self._get_disk_usage_mb(),
             "check_count": self.stats.check_count,
             "warnings": self.stats.warnings.copy(),
             "enabled": self.enabled

@@ -1,9 +1,12 @@
 import discord
 from discord.ext import commands
 import aiohttp
+import asyncio
 import logging
 import os
 import json
+import io
+import sys
 from datetime import datetime
 from character_analyzer import get_character_analyzer
 
@@ -48,6 +51,27 @@ class EveBot(commands.Bot):
 
     async def setup_hook(self):
         self.session = aiohttp.ClientSession()
+
+    async def on_ready(self):
+        flag_file = "restart.flag"
+        if os.path.exists(flag_file):
+            try:
+                with open(flag_file) as f:
+                    data = json.load(f)
+                channel = self.get_channel(data["channel_id"])
+                if channel:
+                    embed = discord.Embed(
+                        title="🔄 Бот перезапущен",
+                        color=discord.Color.green(),
+                        timestamp=datetime.utcnow()
+                    )
+                    embed.set_footer(text="EVE KillBot")
+                    await channel.send(embed=embed)
+            except Exception as e:
+                logging.error(f"Restart flag error: {e}")
+            finally:
+                os.remove(flag_file)
+        logging.info(f"✅ Bot logged in as {self.user}")
 
     async def get_eve_names(self, ids):
         clean_ids = list(set([int(i) for i in ids if i and str(i).isdigit()]))
@@ -174,11 +198,13 @@ bot = EveBot()
 @commands.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(title="EVE KillBot Help", color=discord.Color.green())
-    embed.add_field(name="Basic", value="`!init` | `!status` | `!min [value]`", inline=False)
-    embed.add_field(name="Filters", value="`!add/remove [type] [ID]`\nTypes: system, region, const, ship, corp, char", inline=False)
-    embed.add_field(name="Priority", value="`!add ping_sys [ID]` | `!add ping_ship [ID]`", inline=False)
-    embed.add_field(name="Monitoring", value="`!monitor` - статистика ресурсов", inline=False)
-    embed.add_field(name="Analysis", value="`!analyze <names>` - текстовый анализ\n`!analyzeimg <names>` - анализ с изображением", inline=False)
+    embed.add_field(name="Setup", value="`!init` — инициализация канала\n`!min [value]` — мин. цена (напр. 50000000)\n`!status` — фильтры канала", inline=False)
+    embed.add_field(name="Фильтры", value="`!add [type] [ID]` — добавить фильтр\n`!remove [type] [ID]` — удалить\nTypes: `system`, `region`, `const`, `ship`, `corp`, `char`, `ping_sys`, `ping_ship`", inline=False)
+    embed.add_field(name="Массовое", value="`!addmulti [type] [ID1 ID2 ...]` — добавить список ID (через пробел или запятую)", inline=False)
+    embed.add_field(name="Анализ", value="`!analyze <name>` / `!a` / `!who` — текстовый анализ\n`!analyzeimg <name>` / `!ai` / `!whoimg` — с картинкой\n`!analyze_stats` / `!stats` — статистика аналитика", inline=False)
+    embed.add_field(name="Поиск", value="`!search <запрос>` — поиск по имени/ID", inline=False)
+    embed.add_field(name="Управление", value="`!export` — экспорт фильтров в JSON\n`!import` <JSON> — импорт фильтров\n`!clearcache` — очистить кэш имён\n`!restart` — перезагрузка бота (только админ)", inline=False)
+    embed.add_field(name="Мониторинг", value="`!monitor` — статистика ресурсов\n`!imgstats` — статистика изображений\n`!imgclean` — очистка старых изображений\n`!ping` — пинг\n`!check` — проверка соединений", inline=False)
     await ctx.send(embed=embed)
 
 @commands.command(name="init")
@@ -356,11 +382,11 @@ async def monitor_stats(ctx):
     
     embed.add_field(name="⏱ Время работы", value=stats['uptime'], inline=True)
     embed.add_field(name="✅ Проверок", value=stats['check_count'], inline=True)
-    embed.add_field(name="\u200b", value="\u200b", inline=True)
-    
     embed.add_field(name="🔌 Пик соединений", value=stats['connections_peak'], inline=True)
-    embed.add_field(name="💾 Пик памяти", value=f"{stats['memory_peak_mb']} МБ", inline=True)
-    embed.add_field(name="⚡ Пик CPU", value=f"{stats['cpu_peak_percent']}%", inline=True)
+    
+    embed.add_field(name="💾 Память (тек/пик)", value=f"{stats['memory_current_mb']} / {stats['memory_peak_mb']} МБ", inline=True)
+    embed.add_field(name="⚡ CPU (тек/пик)", value=f"{stats['cpu_current_percent']} / {stats['cpu_peak_percent']}%", inline=True)
+    embed.add_field(name="💽 Диск (проект)", value=f"{stats['disk_usage_mb']} МБ", inline=True)
     
     if stats['warnings']:
         warnings_text = "\n".join(stats['warnings'][-5:])
@@ -373,9 +399,23 @@ async def ping(ctx):
     await ctx.send(f"o7 {ctx.author.mention}!")
 
 @commands.command(name="check")
-async def check(ctx, target_id: int):
-    res = await bot.get_eve_names([target_id])
-    await ctx.send(f"ID `{target_id}` -> **{res.get(target_id, 'Not found')}**")
+async def check(ctx, target_id: int = None):
+    if target_id:
+        res = await bot.get_eve_names([target_id])
+        await ctx.send(f"ID `{target_id}` -> **{res.get(target_id, 'Not found')}**")
+    else:
+        await ctx.send("✅ Бот работает, всё в порядке. Использование: `!check <ID>`")
+
+@commands.command(name="restart")
+@commands.has_permissions(administrator=True)
+async def restart_bot(ctx):
+    """Перезагружает бота"""
+    with open("restart.flag", "w") as f:
+        json.dump({"channel_id": ctx.channel.id}, f)
+    await ctx.send("🔄 Перезагрузка бота...")
+    await asyncio.sleep(1)
+    logging.info("🔄 Restarting bot via !restart command")
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 @commands.command(name="imgstats")
 async def image_stats(ctx):
@@ -565,11 +605,179 @@ async def analyzer_stats(ctx):
     
     await ctx.send(embed=embed)
 
+@commands.command(name="stats")
+async def stats_command(ctx):
+    """Показывает статистику работы бота"""
+    from processor import get_processor_stats
+
+    p_stats = get_processor_stats()
+    subs = load_subs()
+
+    embed = discord.Embed(
+        title="📊 Bot Statistics",
+        color=discord.Color.blue(),
+        timestamp=datetime.utcnow()
+    )
+
+    embed.add_field(name="✅ Processed", value=p_stats["processed_total"], inline=True)
+    embed.add_field(name="📨 Notifications", value=p_stats["notifications_sent"], inline=True)
+    embed.add_field(name="⏭️ Duplicates", value=p_stats["duplicates_skipped"], inline=True)
+    embed.add_field(name="❌ Errors", value=p_stats["errors"], inline=True)
+    embed.add_field(name="📁 Active channels", value=len(subs), inline=True)
+    embed.add_field(name="💾 Name cache", value=len(bot.name_cache), inline=True)
+
+    await ctx.send(embed=embed)
+
+@commands.command(name="search")
+async def search_command(ctx, *, query: str):
+    """Ищет ID систем, персонажей, корпораций, кораблей по названию через ESI"""
+    if not query.strip():
+        await ctx.send("❌ Укажите текст для поиска.")
+        return
+
+    msg = await ctx.send(f"🔍 Searching for `{query}`...")
+
+    try:
+        url = "https://esi.evetech.net/latest/universe/ids/"
+        async with bot.session.post(url, json=[query.strip()]) as resp:
+            if resp.status != 200:
+                await msg.edit(content=f"❌ ESI вернул статус {resp.status}")
+                return
+            data = await resp.json()
+
+    except Exception as e:
+        await msg.edit(content=f"❌ Ошибка запроса: {e}")
+        return
+
+    embed = discord.Embed(title=f"🔍 Search: {query}", color=discord.Color.blue())
+
+    has_results = False
+    categories = [
+        ("characters", "👤 Characters"),
+        ("corporations", "🏢 Corporations"),
+        ("alliances", "🌐 Alliances"),
+        ("systems", "🪐 Systems"),
+        ("constellations", "✨ Constellations"),
+        ("regions", "🌌 Regions"),
+        ("types", "🚀 Types (ships/items)"),
+    ]
+
+    for key, label in categories:
+        items = data.get(key, [])
+        if items:
+            has_results = True
+            lines = [f"• **{item.get('name', '?')}** — ID: `{item.get('id', '?')}`" for item in items[:10]]
+            embed.add_field(name=label, value="\n".join(lines), inline=False)
+
+    if not has_results:
+        await msg.edit(content=f"❌ Ничего не найдено для `{query}`.")
+        return
+
+    embed.set_footer(text="Use !add <type> <ID> to add filters")
+    await msg.edit(content=None, embed=embed)
+
+@commands.command(name="addmulti")
+@commands.has_permissions(manage_messages=True)
+async def add_multi(ctx, category: str, *, ids: str):
+    """Массовое добавление ID в фильтр. Пример: !addmulti system 30000142 30002187"""
+    subs = load_subs()
+    ch_id = str(ctx.channel.id)
+    if ch_id not in subs:
+        return await ctx.send("❌ Use `!init` first.")
+
+    mapping = {
+        "system": "systems", "region": "regions", "ship": "ships",
+        "corp": "corps", "char": "chars", "const": "consts",
+        "ping_sys": "ping_sys", "ping_ship": "ping_ship"
+    }
+
+    cat = category.lower()
+    if cat not in mapping:
+        return await ctx.send("❌ Invalid type. Use: system, region, const, ship, corp, char, ping_sys, ping_ship")
+
+    item_ids = []
+    for part in ids.replace(",", " ").split():
+        try:
+            item_ids.append(int(part))
+        except ValueError:
+            await ctx.send(f"❌ Invalid ID: `{part}`")
+            return
+
+    key = mapping[cat]
+    added = 0
+    for item_id in item_ids:
+        if item_id not in subs[ch_id][key]:
+            subs[ch_id][key].append(item_id)
+            added += 1
+
+    if added > 0:
+        save_subs(subs)
+        bot.config_updated = True
+
+    res = await bot.get_eve_names(item_ids)
+    names_str = ", ".join(res.get(i, f"ID:{i}") for i in item_ids)
+    await ctx.send(f"✅ Added {added}/{len(item_ids)} to {cat}: {names_str}")
+
+@commands.command(name="export")
+@commands.has_permissions(manage_messages=True)
+async def export_config(ctx):
+    """Экспортирует конфигурацию канала в JSON файл"""
+    subs = load_subs()
+    ch_id = str(ctx.channel.id)
+    if ch_id not in subs:
+        await ctx.send("❌ Use `!init` first.")
+        return
+
+    config_json = json.dumps(subs[ch_id], indent=2, ensure_ascii=False)
+    filename = f"config_{ctx.channel.name}_{ch_id}.json"
+    await ctx.send(file=discord.File(io.BytesIO(config_json.encode()), filename=filename))
+
+@commands.command(name="import")
+@commands.has_permissions(manage_messages=True)
+async def import_config(ctx):
+    """Импортирует конфигурацию канала из прикреплённого JSON файла"""
+    if not ctx.message.attachments:
+        await ctx.send("❌ Прикрепите JSON файл с конфигурацией.")
+        return
+
+    attachment = ctx.message.attachments[0]
+    if not attachment.filename.endswith('.json'):
+        await ctx.send("❌ Файл должен быть в формате JSON.")
+        return
+
+    try:
+        content = await attachment.read()
+        config = json.loads(content)
+    except Exception as e:
+        await ctx.send(f"❌ Ошибка чтения файла: {e}")
+        return
+
+    subs = load_subs()
+    ch_id = str(ctx.channel.id)
+    subs[ch_id] = config
+    save_subs(subs)
+    bot.config_updated = True
+    await ctx.send(f"✅ Конфигурация импортирована для канала {ctx.channel.mention}")
+
+@commands.command(name="clearcache")
+@commands.has_permissions(manage_messages=True)
+async def clear_cache(ctx):
+    """Очищает кэш имён ESI"""
+    cache_size = len(bot.name_cache)
+    bot.name_cache.clear()
+    await ctx.send(f"🧹 Кэш имён очищен. Удалено {cache_size} записей.")
+
 # Регистрируем команды
 bot.add_command(analyze_characters)
 bot.add_command(analyze_characters_image)
 bot.add_command(analyzer_stats)
 bot.add_command(image_clean)
+bot.add_command(stats_command)
+bot.add_command(search_command)
+bot.add_command(add_multi)
+bot.add_command(export_config)
+bot.add_command(import_config)
+bot.add_command(clear_cache)
 bot.add_command(help_command)
 bot.add_command(init_channel)
 bot.add_command(set_min_value)
@@ -579,4 +787,5 @@ bot.add_command(status)
 bot.add_command(monitor_stats)
 bot.add_command(ping)
 bot.add_command(check)
+bot.add_command(restart_bot)
 bot.add_command(image_stats)

@@ -68,7 +68,7 @@ def get_current_config():
         global_ids = {
             "corps": set(), "systems": set(), "regions": set(),
             "ships": set(), "ping_sys": set(), "ping_ship": set(),
-            "chars": set(), "consts": set(), "alliances": set(),
+            "chars": set(), "consts": set(), "alliances": set()
         }
         
         for ch_id, ch_data in subs.items():
@@ -113,19 +113,19 @@ async def run_zkill_tasks(shared_queue):
 
             logging.info(f"🚀 Starting workers for {len(config['all_subs'])} channels")
 
-            listener_task = asyncio.create_task(r2z2_loop(shared_queue, config))
+            r2z2_task = asyncio.create_task(r2z2_loop(shared_queue, config))
             processor_task = asyncio.create_task(start_processor(shared_queue, config))
             
             bot.config_updated = False
 
             while not bot.config_updated and not shutdown_event.is_set():
-                if listener_task.done():
+                if r2z2_task.done():
                     try:
-                        listener_task.result()
+                        r2z2_task.result()
                     except asyncio.CancelledError:
                         pass
                     except Exception as e:
-                        logging.error(f"💥 Listener crashed: {e}")
+                        logging.error(f"💥 R2Z2 crashed: {e}")
                     break
                     
                 if processor_task.done():
@@ -141,9 +141,9 @@ async def run_zkill_tasks(shared_queue):
 
             logging.info("🛑 Stopping workers...")
             
-            listener_task.cancel()
+            r2z2_task.cancel()
             processor_task.cancel()
-            await asyncio.gather(listener_task, processor_task, return_exceptions=True)
+            await asyncio.gather(r2z2_task, processor_task, return_exceptions=True)
             
             if not shutdown_event.is_set() and shared_queue.qsize() > 0:
                 logging.info(f"⏳ Processing {shared_queue.qsize()} remaining kills...")
@@ -165,7 +165,7 @@ async def run_zkill_tasks(shared_queue):
     logging.info("📊 Monitoring system stopped")
 
 async def main():
-    queue_size = int(os.getenv("QUEUE_MAX_SIZE", 200))
+    queue_size = int(os.getenv("QUEUE_MAX_SIZE", 1000))
     shared_queue = asyncio.Queue(maxsize=queue_size)
     
     token = os.getenv("DISCORD_BOT_TOKEN")

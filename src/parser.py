@@ -34,6 +34,7 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
             watch_ships = global_filter_sets.get('ships', set())
             watch_corps = global_filter_sets.get('corps', set())
             watch_chars = global_filter_sets.get('chars', set())
+            watch_alliances = global_filter_sets.get('alliances', set())
             ping_sys = global_filter_sets.get('ping_sys', set())
             ping_ship = global_filter_sets.get('ping_ship', set())
         else:
@@ -48,16 +49,17 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
             watch_ships = get_id_set('ships')
             watch_corps = get_id_set('corps')
             watch_chars = get_id_set('chars')
+            watch_alliances = get_id_set('alliances')
             ping_sys = get_id_set('ping_sys')
             ping_ship = get_id_set('ping_ship')
 
         # --- ЛОГИКА ФИЛЬТРАЦИИ ---
         # А. ПРИОРИТЕТЫ (Игнорируют стоимость)
         if system_id in ping_sys:
-            logging.info('Система в приоритете: {system_id}')
+            logging.info(f'Система в приоритете: {system_id}')
             return True, "PRIORITY_TARGET" 
         if ship_id in ping_ship:
-            logging.info('Корабль в приоритете: {ship_id}')
+            logging.info(f'Корабль в приоритете: {ship_id}')
             return True, "PRIORITY_TARGET"
 
         # Б. АТАКУЮЩИЕ (Тоже могут быть приоритеты)
@@ -65,11 +67,15 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
             a_corp_id = int(att.get('corporation_id', 0))
             a_char_id = int(att.get('character_id', 0))
             a_ship_id = int(att.get('ship_type_id', 0))
+            a_alliance_id = int(att.get('alliance_id', 0))
             
             if a_ship_id in ping_ship:  # Проверка корабля атакующего
                 return True, "PRIORITY_TARGET"
             
-            if a_corp_id in watch_corps or a_char_id in watch_chars:
+            if a_ship_id in watch_ships:
+                return True, "SHIP_WATCH"
+            
+            if a_corp_id in watch_corps or a_char_id in watch_chars or a_alliance_id in watch_alliances:
                 return True, "TARGET_KILL"
 
         # В. ПРОВЕРКА СТОИМОСТИ
@@ -88,8 +94,9 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
         # Д. ЖЕРТВА
         v_corp_id = int(victim.get('corporation_id', 0))
         v_char_id = int(victim.get('character_id', 0))
+        v_alliance_id = int(victim.get('alliance_id', 0))
         
-        if v_corp_id in watch_corps or v_char_id in watch_chars:
+        if v_corp_id in watch_corps or v_char_id in watch_chars or v_alliance_id in watch_alliances:
             return True, "TARGET_LOSS"
 
         

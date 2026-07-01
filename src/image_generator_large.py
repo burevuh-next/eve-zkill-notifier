@@ -1,7 +1,7 @@
 import logging
 import os
 import io
-import time  # <-- Добавить этот импорт
+import time
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import aiohttp
@@ -336,7 +336,6 @@ class LargeKillImageGenerator:
 
     async def generate_killmail_image(self, session, killmail_data, names_dict, event_type):
         """Основной метод генерации изображения"""
-        import time
         start_time = time.time()
         
         try:
@@ -484,6 +483,15 @@ class LargeKillImageGenerator:
             time_str = self._parse_kill_time(kill_time)
             
             # Создаем частичную функцию с захваченными данными
+            match_labels = {
+                "PRIORITY_TARGET": "[PRIORITY TARGET]",
+                "TARGET_KILL": "[FRIENDLY KILL]",
+                "TARGET_LOSS": "[FRIENDLY LOSS]",
+                "SHIP_WATCH": "[SHIP WATCH]",
+                "LOCATION_WATCH": "[LOCATION WATCH]",
+            }
+            match_label = match_labels.get(event_type, event_type)
+
             generate_func = partial(
                 self._generate_image_sync,
                 ship_render=ship_render,
@@ -501,6 +509,7 @@ class LargeKillImageGenerator:
                 value=value,
                 k_id=k_id,
                 time_str=time_str,
+                match_label=match_label,
                 attackers_count=len(attackers),
                 victim_card_width=self.calculate_card_width(v_name, v_corp, self.font_medium, self.font_small),
                 killer_card_width=self.calculate_card_width(a_name, a_corp, self.font_medium, self.font_small)
@@ -540,7 +549,7 @@ class LargeKillImageGenerator:
     
     def _generate_image_sync(self, ship_render, v_portrait, a_portrait, v_logo, a_ship,
                             ship_name, sys_name, v_name, v_corp, a_name, a_corp, a_ship_name,
-                            value, k_id, time_str, attackers_count, victim_card_width, killer_card_width):
+                            value, k_id, time_str, match_label, attackers_count, victim_card_width, killer_card_width):
         """Синхронная генерация изображения (выполняется в потоке)"""
         
         # Расчет размеров
@@ -648,8 +657,10 @@ class LargeKillImageGenerator:
         draw.line([(25, bottom_y - 15), (width - 25, bottom_y - 15)], fill=self.colors['border'], width=1)
         
         draw.text((30, bottom_y), f"System: {sys_name}", font=self.font_normal, fill=self.colors['accent_cyan'])
-        draw.text((250, bottom_y), f"Time: {time_str}", font=self.font_normal, fill=self.colors['text_secondary'])
-        draw.text((400, bottom_y), f"Attackers: {attackers_count}", font=self.font_normal, fill=self.colors['text_muted'])
+        draw.text((width // 3, bottom_y), f"Time: {time_str}", font=self.font_normal, fill=self.colors['text_secondary'])
+        draw.text((width // 2, bottom_y), f"Attackers: {attackers_count}", font=self.font_normal, fill=self.colors['text_muted'])
+        match_bbox = draw.textbbox((0, 0), match_label, font=self.font_normal)
+        draw.text((width - match_bbox[2] - 25, bottom_y), match_label, font=self.font_normal, fill=self.colors['accent_gold'])
         
         # Ссылка на zKillboard
         url_text = f"https://zkillboard.com/kill/{k_id}/"
@@ -668,7 +679,6 @@ class LargeKillImageGenerator:
     
     async def generate_character_analysis_image(self, session, char_data, ship_names=None):
         """Генерация изображения для анализа персонажа"""
-        import time
         start_time = time.time()
         ship_names = ship_names or {}
 

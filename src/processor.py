@@ -7,7 +7,6 @@ from parser import parse_killmail
 from discord_utils import bot
 from collections import deque
 
-zkb_log = logging.getLogger('zkb_debug')
 
 processed_kills_set = set()
 processed_kills_queue = deque(maxlen=1000)
@@ -48,7 +47,7 @@ async def process_kill(k_id, killmail_data, ws_data, all_subs, filter_sets):
     if k_id in processed_kills_set:
         return
 
-    zkb_log.debug(f"[PROCESS] KillID={k_id} data_keys={list(killmail_data.keys())}")
+    logging.debug(f"[PROCESS] KillID={k_id} data_keys={list(killmail_data.keys())}")
 
     channel_extra = extract_channel_info(ws_data)
     if channel_extra:
@@ -113,7 +112,7 @@ async def process_pending_kills(all_subs, filter_sets):
                 info["attempts"] += 1
                 backoff = min(PENDING_INTERVAL * (1 + info["attempts"] // 5), 7200)
                 info["next_try"] = now + backoff
-                zkb_log.debug(f"[PENDING] KillID={k_id} retry={attempt} next={time.ctime(info['next_try'])}")
+                logging.debug(f"[PENDING] KillID={k_id} retry={attempt} next={time.ctime(info['next_try'])}")
 
         for k_id in to_remove:
             pending_kills.pop(k_id, None)
