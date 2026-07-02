@@ -216,7 +216,7 @@ async def init_channel(ctx):
         subs[ch_id] = {
             "corps": [], "systems": [], "regions": [], 
             "ships": [], "chars": [], "consts": [], 
-            "ping_sys": [], "ping_ship": [], 
+            "alliances": [], "ping_sys": [], "ping_ship": [], 
             "min_value": 1000000
         }
         save_subs(subs)
@@ -245,12 +245,12 @@ async def add_to_watch(ctx, category: str, item_id: int):
     mapping = {
         "system": "systems", "region": "regions", "ship": "ships", 
         "corp": "corps", "char": "chars", "const": "consts", 
-        "ping_sys": "ping_sys", "ping_ship": "ping_ship"
+        "alliance": "alliances", "ping_sys": "ping_sys", "ping_ship": "ping_ship"
     }
     
     cat = category.lower()
     if cat not in mapping: 
-        return await ctx.send("❌ Invalid type. Use: system, region, const, ship, corp, char, ping_sys, ping_ship")
+        return await ctx.send("❌ Invalid type. Use: system, region, const, ship, corp, char, alliance, ping_sys, ping_ship")
     
     key = mapping[cat]
     if item_id not in subs[ch_id][key]:
@@ -688,12 +688,12 @@ async def add_multi(ctx, category: str, *, ids: str):
     mapping = {
         "system": "systems", "region": "regions", "ship": "ships",
         "corp": "corps", "char": "chars", "const": "consts",
-        "ping_sys": "ping_sys", "ping_ship": "ping_ship"
+        "alliance": "alliances", "ping_sys": "ping_sys", "ping_ship": "ping_ship"
     }
 
     cat = category.lower()
     if cat not in mapping:
-        return await ctx.send("❌ Invalid type. Use: system, region, const, ship, corp, char, ping_sys, ping_ship")
+        return await ctx.send("❌ Invalid type. Use: system, region, const, ship, corp, char, alliance, ping_sys, ping_ship")
 
     item_ids = []
     for part in ids.replace(",", " ").split():
