@@ -253,6 +253,7 @@ async def add_to_watch(ctx, category: str, item_id: int):
         return await ctx.send("❌ Invalid type. Use: system, region, const, ship, corp, char, alliance, ping_sys, ping_ship")
     
     key = mapping[cat]
+    subs[ch_id].setdefault(key, [])
     if item_id not in subs[ch_id][key]:
         subs[ch_id][key].append(item_id)
         save_subs(subs)
@@ -273,7 +274,7 @@ async def remove_from_watch(ctx, category: str, item_id: int):
     }
     
     key = mapping.get(category.lower())
-    if ch_id in subs and key and item_id in subs[ch_id][key]:
+    if ch_id in subs and key and item_id in subs[ch_id].get(key, []):
         subs[ch_id][key].remove(item_id)
         save_subs(subs)
         bot.config_updated = True
@@ -705,6 +706,7 @@ async def add_multi(ctx, category: str, *, ids: str):
             return
 
     key = mapping[cat]
+    subs[ch_id].setdefault(key, [])
     added = 0
     for item_id in item_ids:
         if item_id not in subs[ch_id][key]:
