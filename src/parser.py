@@ -14,9 +14,9 @@ def parse_killmail(full_data, channel_config, global_filter_sets=None):
         zkb = full_data.get('zkb', {})
         
         # 1. Извлекаем основные ID
-        system_id = int(full_data.get('solar_system_id', 0))
-        const_id = int(full_data.get('constellation_id', 0))
-        reg_id = int(full_data.get('region_id', 0))
+        system_id = int(full_data.get('solar_system_id') or 0)
+        const_id = int(full_data.get('constellation_id') or 0)
+        reg_id = int(full_data.get('region_id') or 0)
         ship_id = int(victim.get('ship_type_id', 0))
         
         # Стоимость килла
