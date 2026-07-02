@@ -292,7 +292,7 @@ async def status(ctx):
     
     # Собираем все ID для получения имен
     all_ids = []
-    for k in ["ships","systems","regions","consts","corps","chars","ping_sys","ping_ship"]:
+    for k in ["ships","systems","regions","consts","corps","chars","alliances","ping_sys","ping_ship"]:
         all_ids.extend(ch_data.get(k, []))
     
     names = await bot.get_eve_names(all_ids)
@@ -311,7 +311,8 @@ async def status(ctx):
         ("consts", "⚡ **Constellations**", "✨"),
         ("ships", "🚀 **Ships**", "⚓"),
         ("corps", "🏢 **Corporations**", "🏛️"),
-        ("chars", "👤 **Characters**", "🧑")
+        ("chars", "👤 **Characters**", "🧑"),
+        ("alliances", "🤝 **Alliances**", "🔗")
     ]
     
     has_any = False
@@ -356,7 +357,7 @@ async def status(ctx):
     )
     
     # Добавляем статистику
-    total_filters = sum(len(ch_data.get(k, [])) for k in ["ships","systems","regions","consts","corps","chars","ping_sys","ping_ship"])
+    total_filters = sum(len(ch_data.get(k, [])) for k in ["ships","systems","regions","consts","corps","chars","alliances","ping_sys","ping_ship"])
     embed.set_footer(text=f"Total filters: {total_filters} • Channel ID: {ch_id}")
     
     await ctx.send(embed=embed)
