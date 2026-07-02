@@ -339,7 +339,6 @@ class LargeKillImageGenerator:
         start_time = time.time()
         
         try:
-            # Подготавливаем данные для генерации (это быстро, можно в основном потоке)
             victim = killmail_data.get('victim', {})
             zkb = killmail_data.get('zkb', {})
             attackers = killmail_data.get('attackers', [])

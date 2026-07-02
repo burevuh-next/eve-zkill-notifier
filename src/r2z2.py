@@ -65,6 +65,15 @@ def matches_filters_strict(kill_data, filter_sets):
             return True, "ship"
         if a_ship and a_ship in filter_sets.get("ping_ship", set()):
             return True, "ping_ship"
+        a_corp = att.get("corporation_id")
+        a_char = att.get("character_id")
+        a_alliance = att.get("alliance_id")
+        if a_corp and a_corp in filter_sets.get("corps", set()):
+            return True, "corp"
+        if a_char and a_char in filter_sets.get("chars", set()):
+            return True, "char"
+        if a_alliance and a_alliance in filter_sets.get("alliances", set()):
+            return True, "alliance"
 
     system_id = esi.get("solar_system_id")
     if system_id and system_id in filter_sets.get("systems", set()):

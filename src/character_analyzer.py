@@ -14,6 +14,7 @@ class CharacterAnalyzer:
     
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
+        self._esi_semaphore = asyncio.Semaphore(10)
         self.cache = {
             "characters": {},      # {char_id: {"name": name, "corporation_id": corp_id, "alliance_id": alliance_id}}
             "corporations": {},    # {corp_id: {"name": name, "ticker": ticker}}
@@ -68,24 +69,25 @@ class CharacterAnalyzer:
         url = "https://esi.evetech.net/latest/universe/ids/"
         
         try:
-            async with self.session.post(url, json=clean_names) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    result = {}
-                    
-                    for char_data in data.get('characters', []):
-                        result[char_data['name']] = char_data['id']
-                    
-                    found_names = set(result.keys())
-                    for name in clean_names:
-                        if name not in found_names:
-                            logging.debug(f"Персонаж не найден: {name}")
-                    
-                    return result
-                else:
-                    self.stats["api_errors"] += 1
-                    logging.warning(f"ESI вернул статус {resp.status} при поиске имен")
-                    return {}
+            async with self._esi_semaphore:
+                async with self.session.post(url, json=clean_names) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        result = {}
+                        
+                        for char_data in data.get('characters', []):
+                            result[char_data['name']] = char_data['id']
+                        
+                        found_names = set(result.keys())
+                        for name in clean_names:
+                            if name not in found_names:
+                                logging.debug(f"Персонаж не найден: {name}")
+                        
+                        return result
+                    else:
+                        self.stats["api_errors"] += 1
+                        logging.warning(f"ESI вернул статус {resp.status} при поиске имен")
+                        return {}
         except Exception as e:
             self.stats["api_errors"] += 1
             logging.error(f"Ошибка при поиске имен: {e}")
@@ -103,35 +105,36 @@ class CharacterAnalyzer:
         url = f"https://esi.evetech.net/latest/characters/{character_id}/"
         
         try:
-            async with self.session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    
-                    char_info = {
-                        "id": character_id,
-                        "name": data.get('name', f"Unknown_{character_id}"),
-                        "corporation_id": data.get('corporation_id', 0),
-                        "alliance_id": data.get('alliance_id', 0),
-                        "birthday": data.get('birthday', ''),
-                        "security_status": data.get('security_status', 0),
-                        "title": data.get('title', '')
-                    }
-                    
-                    if char_info["corporation_id"]:
-                        corp_info = await self.get_corporation_info(char_info["corporation_id"])
-                        char_info["corporation_name"] = corp_info.get("name", "Unknown")
-                        char_info["corporation_ticker"] = corp_info.get("ticker", "")
-                    
-                    if char_info["alliance_id"]:
-                        alliance_info = await self.get_alliance_info(char_info["alliance_id"])
-                        char_info["alliance_name"] = alliance_info.get("name", "Unknown")
-                        char_info["alliance_ticker"] = alliance_info.get("ticker", "")
-                    
-                    self.cache["characters"][character_id] = char_info
-                    return char_info
-                else:
-                    self.stats["api_errors"] += 1
-                    return {"id": character_id, "name": f"Unknown_{character_id}"}
+            async with self._esi_semaphore:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        
+                        char_info = {
+                            "id": character_id,
+                            "name": data.get('name', f"Unknown_{character_id}"),
+                            "corporation_id": data.get('corporation_id', 0),
+                            "alliance_id": data.get('alliance_id', 0),
+                            "birthday": data.get('birthday', ''),
+                            "security_status": data.get('security_status', 0),
+                            "title": data.get('title', '')
+                        }
+                        
+                        if char_info["corporation_id"]:
+                            corp_info = await self.get_corporation_info(char_info["corporation_id"])
+                            char_info["corporation_name"] = corp_info.get("name", "Unknown")
+                            char_info["corporation_ticker"] = corp_info.get("ticker", "")
+                        
+                        if char_info["alliance_id"]:
+                            alliance_info = await self.get_alliance_info(char_info["alliance_id"])
+                            char_info["alliance_name"] = alliance_info.get("name", "Unknown")
+                            char_info["alliance_ticker"] = alliance_info.get("ticker", "")
+                        
+                        self.cache["characters"][character_id] = char_info
+                        return char_info
+                    else:
+                        self.stats["api_errors"] += 1
+                        return {"id": character_id, "name": f"Unknown_{character_id}"}
         except Exception as e:
             self.stats["api_errors"] += 1
             logging.error(f"Ошибка получения информации о персонаже {character_id}: {e}")
@@ -148,19 +151,20 @@ class CharacterAnalyzer:
         url = f"https://esi.evetech.net/latest/corporations/{corporation_id}/"
         
         try:
-            async with self.session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    corp_info = {
-                        "id": corporation_id,
-                        "name": data.get('name', f"Corp_{corporation_id}"),
-                        "ticker": data.get('ticker', ''),
-                        "member_count": data.get('member_count', 0)
-                    }
-                    self.cache["corporations"][corporation_id] = corp_info
-                    return corp_info
-                else:
-                    return {"id": corporation_id, "name": f"Corp_{corporation_id}", "ticker": ""}
+            async with self._esi_semaphore:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        corp_info = {
+                            "id": corporation_id,
+                            "name": data.get('name', f"Corp_{corporation_id}"),
+                            "ticker": data.get('ticker', ''),
+                            "member_count": data.get('member_count', 0)
+                        }
+                        self.cache["corporations"][corporation_id] = corp_info
+                        return corp_info
+                    else:
+                        return {"id": corporation_id, "name": f"Corp_{corporation_id}", "ticker": ""}
         except Exception:
             return {"id": corporation_id, "name": f"Corp_{corporation_id}", "ticker": ""}
     
@@ -175,18 +179,19 @@ class CharacterAnalyzer:
         url = f"https://esi.evetech.net/latest/alliances/{alliance_id}/"
         
         try:
-            async with self.session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    alliance_info = {
-                        "id": alliance_id,
-                        "name": data.get('name', f"Alliance_{alliance_id}"),
-                        "ticker": data.get('ticker', '')
-                    }
-                    self.cache["alliances"][alliance_id] = alliance_info
-                    return alliance_info
-                else:
-                    return {"id": alliance_id, "name": f"Alliance_{alliance_id}", "ticker": ""}
+            async with self._esi_semaphore:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        alliance_info = {
+                            "id": alliance_id,
+                            "name": data.get('name', f"Alliance_{alliance_id}"),
+                            "ticker": data.get('ticker', '')
+                        }
+                        self.cache["alliances"][alliance_id] = alliance_info
+                        return alliance_info
+                    else:
+                        return {"id": alliance_id, "name": f"Alliance_{alliance_id}", "ticker": ""}
         except Exception:
             return {"id": alliance_id, "name": f"Alliance_{alliance_id}", "ticker": ""}
     
@@ -198,14 +203,15 @@ class CharacterAnalyzer:
         url = f"https://esi.evetech.net/latest/killmails/{kill_id}/{hash}/"
         
         try:
-            async with self.session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    logging.info(f"Получены данные из ESI для килла {kill_id}")
-                    return data
-                else:
-                    logging.warning(f"ESI вернул {resp.status} для килла {kill_id}")
-                    return None
+            async with self._esi_semaphore:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        logging.info(f"Получены данные из ESI для килла {kill_id}")
+                        return data
+                    else:
+                        logging.warning(f"ESI вернул {resp.status} для килла {kill_id}")
+                        return None
         except Exception as e:
             logging.error(f"Ошибка при запросе к ESI для килла {kill_id}: {e}")
             return None
@@ -536,14 +542,15 @@ class CharacterAnalyzer:
         url = f"https://esi.evetech.net/latest/characters/{character_id}/"
         
         try:
-            async with self.session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    name = data.get('name', f"Char_{character_id}")
-                    self.cache["characters"][character_id] = {"name": name, "id": character_id}
-                    return name
-                else:
-                    return f"Char_{character_id}"
+            async with self._esi_semaphore:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        name = data.get('name', f"Char_{character_id}")
+                        self.cache["characters"][character_id] = {"name": name, "id": character_id}
+                        return name
+                    else:
+                        return f"Char_{character_id}"
         except Exception:
             return f"Char_{character_id}"
     
@@ -559,14 +566,15 @@ class CharacterAnalyzer:
         url = f"https://esi.evetech.net/latest/universe/types/{ship_id}/"
         
         try:
-            async with self.session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    name = data.get('name', f"Ship_{ship_id}")
-                    self.cache["ships"][ship_id] = name
-                    return name
-                else:
-                    return f"Ship_{ship_id}"
+            async with self._esi_semaphore:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        name = data.get('name', f"Ship_{ship_id}")
+                        self.cache["ships"][ship_id] = name
+                        return name
+                    else:
+                        return f"Ship_{ship_id}"
         except Exception:
             return f"Ship_{ship_id}"
     
@@ -583,14 +591,15 @@ class CharacterAnalyzer:
         url = f"https://esi.evetech.net/latest/universe/systems/{system_id}/"
         
         try:
-            async with self.session.get(url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    name = data.get('name', f"System_{system_id}")
-                    self.cache[cache_key] = name
-                    return name
-                else:
-                    return f"System_{system_id}"
+            async with self._esi_semaphore:
+                async with self.session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        name = data.get('name', f"System_{system_id}")
+                        self.cache[cache_key] = name
+                        return name
+                    else:
+                        return f"System_{system_id}"
         except Exception:
             return f"System_{system_id}"
     
