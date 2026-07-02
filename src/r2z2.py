@@ -81,11 +81,11 @@ def matches_filters_strict(kill_data, filter_sets):
     if system_id and system_id in filter_sets.get("ping_sys", set()):
         return True, "ping_sys"
 
-    region_id = esi.get("region_id")
+    region_id = kill_data.get("region_id") or esi.get("region_id")
     if region_id and region_id in filter_sets.get("regions", set()):
         return True, "region"
 
-    const_id = esi.get("constellation_id")
+    const_id = kill_data.get("constellation_id") or esi.get("constellation_id")
     if const_id and const_id in filter_sets.get("consts", set()):
         return True, "const"
 
@@ -105,6 +105,8 @@ def build_kill_packet(kill_data):
         "attackers": esi.get("attackers", []),
         "killmail_time": esi.get("killmail_time", ""),
         "solar_system_id": esi.get("solar_system_id"),
+        "constellation_id": kill_data.get("constellation_id"),
+        "region_id": kill_data.get("region_id"),
         "hash": esi_hash,
         "channel": "r2z2",
     }
