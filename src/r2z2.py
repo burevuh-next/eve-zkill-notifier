@@ -13,6 +13,37 @@ RATE_LIMIT_SLEEP = 0.2
 
 MATCHES_FILTERS = os.getenv("MATCHES_FILTERS", "all").lower()
 
+ESI_SYSTEM_CACHE = {}
+ESI_CONSTELLATION_CACHE = {}
+
+async def resolve_system_info(session, system_id):
+    if system_id in ESI_SYSTEM_CACHE:
+        return ESI_SYSTEM_CACHE[system_id]
+    url = f"https://esi.evetech.net/latest/universe/systems/{system_id}/"
+    try:
+        async with session.get(url) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                const_id = data.get("constellation_id")
+                info = {"constellation_id": const_id, "region_id": None}
+                if const_id:
+                    if const_id in ESI_CONSTELLATION_CACHE:
+                        info["region_id"] = ESI_CONSTELLATION_CACHE[const_id]
+                    else:
+                        const_url = f"https://esi.evetech.net/latest/universe/constellations/{const_id}/"
+                        async with session.get(const_url) as const_resp:
+                            if const_resp.status == 200:
+                                const_data = await const_resp.json()
+                                info["region_id"] = const_data.get("region_id")
+                                ESI_CONSTELLATION_CACHE[const_id] = info["region_id"]
+                ESI_SYSTEM_CACHE[system_id] = info
+                logger.info(f"🌌 Resolved system {system_id}: region={info['region_id']} const={info['constellation_id']}")
+                return info
+    except Exception as e:
+        logger.warning(f"resolve_system_info({system_id}): {e}")
+    ESI_SYSTEM_CACHE[system_id] = {}
+    return {}
+
 async def get_sequence(session, max_retries=3):
     for attempt in range(1, max_retries + 1):
         try:
@@ -128,6 +159,15 @@ async def r2z2_loop(data_queue, config):
             try:
                 kill_data = await fetch_kill(session, seq)
                 if kill_data:
+                    esi = kill_data.get("esi") or {}
+                    system_id = esi.get("solar_system_id")
+                    if system_id and (not kill_data.get("region_id") or not kill_data.get("constellation_id")):
+                        info = await resolve_system_info(session, system_id)
+                        if kill_data.get("region_id") is None:
+                            kill_data["region_id"] = info.get("region_id")
+                        if kill_data.get("constellation_id") is None:
+                            kill_data["constellation_id"] = info.get("constellation_id")
+
                     if MATCHES_FILTERS == "strict":
                         is_match, match_type = matches_filters_strict(kill_data, filter_sets)
                         if not is_match:
