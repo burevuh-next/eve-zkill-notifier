@@ -269,7 +269,7 @@ async def remove_from_watch(ctx, category: str, item_id: int):
     mapping = {
         "system": "systems", "region": "regions", "ship": "ships", 
         "corp": "corps", "char": "chars", "const": "consts", 
-        "ping_sys": "ping_sys", "ping_ship": "ping_ship"
+        "alliance": "alliances", "ping_sys": "ping_sys", "ping_ship": "ping_ship"
     }
     
     key = mapping.get(category.lower())
