@@ -199,7 +199,7 @@ bot = EveBot()
 async def help_command(ctx):
     embed = discord.Embed(title="EVE KillBot Help", color=discord.Color.green())
     embed.add_field(name="Setup", value="`!init` — инициализация канала\n`!min [value]` — мин. цена (напр. 50000000)\n`!status` — фильтры канала", inline=False)
-    embed.add_field(name="Фильтры", value="`!add [type] [ID]` — добавить фильтр\n`!remove [type] [ID]` — удалить\nTypes: `system`, `region`, `const`, `ship`, `corp`, `char`, `ping_sys`, `ping_ship`", inline=False)
+    embed.add_field(name="Фильтры", value="`!add [type] [ID]` — добавить фильтр\n`!remove [type] [ID]` — удалить\nTypes: `system`, `region`, `const`, `ship`, `corp`, `char`, `alliance`, `ping_sys`, `ping_ship`", inline=False)
     embed.add_field(name="Массовое", value="`!addmulti [type] [ID1 ID2 ...]` — добавить список ID (через пробел или запятую)", inline=False)
     embed.add_field(name="Анализ", value="`!analyze <name>` / `!a` / `!who` — текстовый анализ\n`!analyzeimg <name>` / `!ai` / `!whoimg` — с картинкой\n`!analyze_stats` / `!stats` — статистика аналитика", inline=False)
     embed.add_field(name="Поиск", value="`!search <запрос>` — поиск по имени/ID", inline=False)
